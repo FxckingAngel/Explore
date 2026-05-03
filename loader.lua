@@ -3,13 +3,15 @@
 	FxckingAngel/Explore
 	
 	Usage:
-	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/main/loader.lua"))()
+	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/loader.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/main/Modules/"
+local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
 
 local function fetch(module)
-	local ok, src = pcall(game.HttpGet, game, BASE_URL .. module .. ".lua")
+	local ok, src = pcall(function()
+		return game:HttpGet(BASE_URL .. module .. ".lua")
+	end)
 	if not ok or not src or #src == 0 then
 		error(("[Dex] Failed to fetch '"..module.."': "..tostring(src)), 2)
 	end
@@ -153,21 +155,35 @@ local createSimple = function(class, props)
 	return inst
 end
 
--- Build icon maps (mirrors Main.Init)
-local Lib = LibControl.Main()
-
 -- Stub Main table that modules need
 local Main = {
 	Elevated = elevated,
 	GuiHolder = GuiHolder,
 	Mouse = plr:GetMouse(),
 	DisplayOrders = {SideWindow=8, Window=10, Menu=100000, Core=101000},
-	MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16),
-	LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32),
+	MiscIcons = nil,
+	LargeIcons = nil,
 	Apps = {},
 	AppControls = {},
 	MenuApps = {},
 }
+
+-- Wire up deps for all controls
+local env = {}
+local Apps = Main.Apps
+
+local deps = {
+	Main=Main, Lib=nil, Apps=Apps, Settings=Settings,
+	API=nil, RMD=nil, env=env, service=service, plr=plr,
+	create=create, createSimple=createSimple,
+}
+
+-- Lib needs deps before Main() so service/plr/create helpers exist
+LibControl.InitDeps(deps)
+local Lib = LibControl.Main()
+deps.Lib = Lib
+Main.MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16)
+Main.LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32)
 
 Main.MiscIcons:SetDict({
 	Reference=0, Cut=1, Cut_Disabled=2, Copy=3, Copy_Disabled=4, Paste=5, Paste_Disabled=6,
@@ -187,8 +203,29 @@ end
 
 -- Fetch API + RMD (needed by Explorer & Properties)
 print("[Dex] Fetching API...")
-local rawAPI = game:HttpGet("http://setup.roblox.com/"..Version().."-API-Dump.json")
-local apiData = game:GetService("HttpService"):JSONDecode(rawAPI)
+local env = (type(getfenv) == "function" and getfenv()) or _G
+local getVersion = env.Version or env.version or _G.Version or _G.version
+if type(getVersion) ~= "function" then
+	error("[Dex] Could not resolve Roblox version function (Version/version)")
+end
+
+local okVersion, versionId = pcall(getVersion)
+if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
+	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
+end
+
+local apiUrl = "https://setup.roblox.com/"..versionId.."-API-Dump.json"
+local okApiFetch, rawAPI = pcall(function()
+	return game:HttpGet(apiUrl)
+end)
+if not okApiFetch or type(rawAPI) ~= "string" or #rawAPI == 0 then
+	error("[Dex] Failed to fetch API dump from "..apiUrl..": "..tostring(rawAPI))
+end
+
+local okApiDecode, apiData = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), rawAPI)
+if not okApiDecode or type(apiData) ~= "table" then
+	error("[Dex] Failed to decode API dump JSON: "..tostring(apiData))
+end
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
 local seenCats = {}
@@ -272,15 +309,8 @@ pcall(function()
 	end
 end)
 
--- Wire up deps for all controls
-local env = {}
-local Apps = Main.Apps
-
-local deps = {
-	Main=Main, Lib=Lib, Apps=Apps, Settings=Settings,
-	API=API, RMD=RMD, env=env, service=service, plr=plr,
-	create=create, createSimple=createSimple,
-}
+deps.API = API
+deps.RMD = RMD
 
 LibControl.InitDeps(deps)
 ExplorerControl.InitDeps(deps)

@@ -34,7 +34,8 @@ end
 local function main()
 	local Lib = {}
 
-	local renderStepped = service.RunService.RenderStepped
+	local runService = (service and service.RunService) or game:GetService("RunService")
+	local renderStepped = runService.RenderStepped
 	local signalWait = renderStepped.wait
 	local PH = newproxy() -- Placeholder, must be replaced in constructor
 	local SIGNAL = newproxy()
