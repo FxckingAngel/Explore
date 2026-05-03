@@ -187,7 +187,12 @@ end
 
 -- Fetch API + RMD (needed by Explorer & Properties)
 print("[Dex] Fetching API...")
-local rawAPI = game:HttpGet("http://setup.roblox.com/"..Version().."-API-Dump.json")
+local getVersion = rawget(_G, "Version") or rawget(_G, "version")
+if type(getVersion) ~= "function" then
+	error("[Dex] Could not resolve Roblox version function (Version/version)")
+end
+
+local rawAPI = game:HttpGet("http://setup.roblox.com/"..getVersion().."-API-Dump.json")
 local apiData = game:GetService("HttpService"):JSONDecode(rawAPI)
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
