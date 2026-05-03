@@ -69,6 +69,15 @@ local function main()
 		if #result == 0 then
 			return nil, ("'%s' returned empty string"):format(name)
 		end
+		local lowered = string.lower(result)
+		if lowered:find("<!doctype html", 1, true)
+			or lowered:find("<html", 1, true)
+			or lowered:find("cloudfront", 1, true)
+			or lowered:find("request could not be satisfied", 1, true)
+			or lowered:find("konstant api", 1, true)
+		then
+			return nil, ("'%s' returned remote HTML/error payload"):format(name)
+		end
 		return result, nil
 	end
 
