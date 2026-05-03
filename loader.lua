@@ -212,8 +212,16 @@ if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
 	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
 end
 
-local rawAPI = game:HttpGet("https://setup.roblox.com/"..versionId.."-API-Dump.json")
-local apiData = game:GetService("HttpService"):JSONDecode(rawAPI)
+local apiUrl = "https://setup.roblox.com/"..versionId.."-API-Dump.json"
+local okApiFetch, rawAPI = pcall(game.HttpGet, game, apiUrl)
+if not okApiFetch or type(rawAPI) ~= "string" or #rawAPI == 0 then
+	error("[Dex] Failed to fetch API dump from "..apiUrl..": "..tostring(rawAPI))
+end
+
+local okApiDecode, apiData = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), rawAPI)
+if not okApiDecode or type(apiData) ~= "table" then
+	error("[Dex] Failed to decode API dump JSON: "..tostring(apiData))
+end
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
 local seenCats = {}
