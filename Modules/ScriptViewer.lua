@@ -229,10 +229,34 @@ local function main()
 		window:Resize(500, 400)
 		ScriptViewer.Window = window
 
-		codeFrame = Lib.CodeFrame.new()
-		codeFrame.Frame.Position = UDim2.new(0, 0, 0, 20)
-		codeFrame.Frame.Size = UDim2.new(1, 0, 1, -20)
-		codeFrame.Frame.Parent = window.GuiElems.Content
+		if Lib.CodeFrame and Lib.CodeFrame.new then
+			codeFrame = Lib.CodeFrame.new()
+			codeFrame.Frame.Position = UDim2.new(0, 0, 0, 20)
+			codeFrame.Frame.Size = UDim2.new(1, 0, 1, -20)
+			codeFrame.Frame.Parent = window.GuiElems.Content
+		else
+			local fallback = Instance.new("TextBox")
+			fallback.Name = "CodeFrameFallback"
+			fallback.MultiLine = true
+			fallback.ClearTextOnFocus = false
+			fallback.TextXAlignment = Enum.TextXAlignment.Left
+			fallback.TextYAlignment = Enum.TextYAlignment.Top
+			fallback.Font = Enum.Font.Code
+			fallback.TextSize = 14
+			fallback.TextWrapped = false
+			fallback.Text = ""
+			fallback.TextColor3 = Color3.new(1,1,1)
+			fallback.BackgroundColor3 = Color3.fromRGB(36,36,36)
+			fallback.BorderSizePixel = 0
+			fallback.Position = UDim2.new(0, 0, 0, 20)
+			fallback.Size = UDim2.new(1, 0, 1, -20)
+			fallback.Parent = window.GuiElems.Content
+			codeFrame = {
+				Frame = fallback,
+				SetText = function(_,txt) fallback.Text = txt or "" end,
+				GetText = function() return fallback.Text end,
+			}
+		end
 
 		-- Copy to Clipboard button
 		local copy = Instance.new("TextButton", window.GuiElems.Content)
