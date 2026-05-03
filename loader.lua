@@ -214,17 +214,31 @@ if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
 	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
 end
 
-local apiUrl = "https://setup.roblox.com/"..versionId.."-API-Dump.json"
-local okApiFetch, rawAPI = pcall(function()
-	return game:HttpGet(apiUrl)
-end)
-if not okApiFetch or type(rawAPI) ~= "string" or #rawAPI == 0 then
-	error("[Dex] Failed to fetch API dump from "..apiUrl..": "..tostring(rawAPI))
+local apiUrls = {
+	"https://setup.roblox.com/"..versionId.."-API-Dump.json",
+	"https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/API-Dump.json",
+}
+
+local rawAPI, lastApiErr, usedApiUrl
+for i = 1, #apiUrls do
+	local url = apiUrls[i]
+	local okApiFetch, data = pcall(function()
+		return game:HttpGet(url)
+	end)
+	if okApiFetch and type(data) == "string" and #data > 0 then
+		rawAPI = data
+		usedApiUrl = url
+		break
+	end
+	lastApiErr = tostring(data)
+end
+if not rawAPI then
+	error("[Dex] Failed to fetch API dump. Last error: "..tostring(lastApiErr))
 end
 
 local okApiDecode, apiData = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), rawAPI)
 if not okApiDecode or type(apiData) ~= "table" then
-	error("[Dex] Failed to decode API dump JSON: "..tostring(apiData))
+	error("[Dex] Failed to decode API dump JSON from "..tostring(usedApiUrl)..": "..tostring(apiData))
 end
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
