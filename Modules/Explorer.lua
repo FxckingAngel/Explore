@@ -1284,7 +1284,7 @@ local function main()
 		local sub=string.sub
 		local lower=string.lower
 		local match=string.match
-		local ops={["("]="(",[")"]=")","||"=" or ","&&"=" and "}
+		local ops={["("]="(",[")"]=")",["||"]=" or ",["&&"]=" and "}
 		local filterCount=0
 		local compFilters=Explorer.SearchFilters.Comparison
 		local specFilters=Explorer.SearchFilters.Specific
