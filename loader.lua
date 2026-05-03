@@ -9,7 +9,9 @@
 local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
 
 local function fetch(module)
-	local ok, src = pcall(game.HttpGet, game, BASE_URL .. module .. ".lua")
+	local ok, src = pcall(function()
+		return game:HttpGet(BASE_URL .. module .. ".lua")
+	end)
 	if not ok or not src or #src == 0 then
 		error(("[Dex] Failed to fetch '"..module.."': "..tostring(src)), 2)
 	end
@@ -213,7 +215,9 @@ if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
 end
 
 local apiUrl = "https://setup.roblox.com/"..versionId.."-API-Dump.json"
-local okApiFetch, rawAPI = pcall(game.HttpGet, game, apiUrl)
+local okApiFetch, rawAPI = pcall(function()
+	return game:HttpGet(apiUrl)
+end)
 if not okApiFetch or type(rawAPI) ~= "string" or #rawAPI == 0 then
 	error("[Dex] Failed to fetch API dump from "..apiUrl..": "..tostring(rawAPI))
 end
