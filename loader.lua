@@ -3,10 +3,10 @@
 	FxckingAngel/Explore
 	
 	Usage:
-	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/main/loader.lua"))()
+	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/loader.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/main/Modules/"
+local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
 
 local function fetch(module)
 	local ok, src = pcall(game.HttpGet, game, BASE_URL .. module .. ".lua")
@@ -198,7 +198,7 @@ if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
 	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
 end
 
-local rawAPI = game:HttpGet("http://setup.roblox.com/"..versionId.."-API-Dump.json")
+local rawAPI = game:HttpGet("https://setup.roblox.com/"..versionId.."-API-Dump.json")
 local apiData = game:GetService("HttpService"):JSONDecode(rawAPI)
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
