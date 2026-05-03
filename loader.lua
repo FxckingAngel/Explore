@@ -350,10 +350,15 @@ SVControl.InitAfterMain(appTable)
 
 -- Init window system then each app
 print("[Dex] Building UI...")
-Lib.Window.Init()
-Explorer.Init()
-Properties.Init()
-ScriptViewer.Init()
+	Lib.Window.Init()
+	Explorer.Init()
+	Properties.Init()
+	local okSV, svErr = pcall(function()
+		ScriptViewer.Init()
+	end)
+	if not okSV then
+		warn("[Dex] ScriptViewer failed to initialize: "..tostring(svErr))
+	end
 
 -- Show Explorer + Properties docked to the right side by default
 Explorer.Window:Show({Align="right", Pos=1, Size=0.5, Silent=true})
