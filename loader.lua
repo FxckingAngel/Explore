@@ -153,21 +153,35 @@ local createSimple = function(class, props)
 	return inst
 end
 
--- Build icon maps (mirrors Main.Init)
-local Lib = LibControl.Main()
-
 -- Stub Main table that modules need
 local Main = {
 	Elevated = elevated,
 	GuiHolder = GuiHolder,
 	Mouse = plr:GetMouse(),
 	DisplayOrders = {SideWindow=8, Window=10, Menu=100000, Core=101000},
-	MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16),
-	LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32),
+	MiscIcons = nil,
+	LargeIcons = nil,
 	Apps = {},
 	AppControls = {},
 	MenuApps = {},
 }
+
+-- Wire up deps for all controls
+local env = {}
+local Apps = Main.Apps
+
+local deps = {
+	Main=Main, Lib=nil, Apps=Apps, Settings=Settings,
+	API=nil, RMD=nil, env=env, service=service, plr=plr,
+	create=create, createSimple=createSimple,
+}
+
+-- Lib needs deps before Main() so service/plr/create helpers exist
+LibControl.InitDeps(deps)
+local Lib = LibControl.Main()
+deps.Lib = Lib
+Main.MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16)
+Main.LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32)
 
 Main.MiscIcons:SetDict({
 	Reference=0, Cut=1, Cut_Disabled=2, Copy=3, Copy_Disabled=4, Paste=5, Paste_Disabled=6,
@@ -283,15 +297,8 @@ pcall(function()
 	end
 end)
 
--- Wire up deps for all controls
-local env = {}
-local Apps = Main.Apps
-
-local deps = {
-	Main=Main, Lib=Lib, Apps=Apps, Settings=Settings,
-	API=API, RMD=RMD, env=env, service=service, plr=plr,
-	create=create, createSimple=createSimple,
-}
+deps.API = API
+deps.RMD = RMD
 
 LibControl.InitDeps(deps)
 ExplorerControl.InitDeps(deps)
