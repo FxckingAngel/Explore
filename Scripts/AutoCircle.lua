@@ -98,33 +98,21 @@ end
 -- ── Ball detection ────────────────────────────────────────────────────────────
 -- Deathball game: ball is usually named "Ball", "DeathBall", "Sphere" etc
 -- We detect it by: spherical shape, unanchored, moving, NOT a player part
-local BALL_NAMES = {
-	"ball", "deathball", "death_ball", "sphere", "projectile",
-	"puck", "orb", "boulder", "rock", "bomb",
+-- EXPLICIT exclusions — never treat these as the ball
+local NEVER_BALL = {
+	"sword","blade","katana","weapon","tool","handle","rock","stone",
+	"rocktemplate","template","debris","shard","fragment","part",
+	"hitbox","hurtbox","damagebox","effect","vfx","particle",
+	"baseplate","platform","spawn","map","floor","wall","ceiling",
+	"humanoidrootpart","rootpart","head","torso","arm","leg","hand",
+	"foot","leftarm","rightarm","leftleg","rightleg","upperbody","lowerbody",
 }
 
-local function looksLikeBall(obj)
-	if not obj:IsA("BasePart") then return false end
-	if obj.Anchored then return false end
-
-	-- Check name match
-	local name = obj.Name:lower()
-	for _, n in pairs(BALL_NAMES) do
-		if name == n or name:find(n) then return true end
+local function isExcluded(name)
+	name = name:lower()
+	for _, n in pairs(NEVER_BALL) do
+		if name == n or name:find(n, 1, true) then return true end
 	end
-
-	-- Check shape: sphere or roughly equal XYZ size
-	if obj:IsA("Part") then
-		if obj.Shape == Enum.PartType.Ball then return true end
-		local s = obj.Size
-		local ratio = math.max(s.X,s.Y,s.Z) / math.max(0.01, math.min(s.X,s.Y,s.Z))
-		if ratio < 1.5 and s.X > 1 then return true end  -- roughly spherical
-	end
-
-	-- Check if it has a ball-like mesh
-	local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
-	if mesh and mesh.MeshType == Enum.MeshType.Sphere then return true end
-
 	return false
 end
 
@@ -136,11 +124,56 @@ local function isPlayerPart(obj)
 	return false
 end
 
--- Find the ball in workspace
+local function looksLikeBall(obj)
+	if not obj:IsA("BasePart") then return false end
+	if obj.Anchored then return false end
+	if isPlayerPart(obj) then return false end
+	if isExcluded(obj.Name) then return false end
+
+	-- Must be a sphere shape OR special sphere mesh
+	local isSphere = false
+
+	if obj:IsA("Part") and obj.Shape == Enum.PartType.Ball then
+		isSphere = true
+	end
+
+	local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
+	if mesh and mesh.MeshType == Enum.MeshType.Sphere then
+		isSphere = true
+	end
+
+	if not isSphere then return false end
+
+	-- Must be roughly equal XYZ (a real ball, not a flat disc)
+	local s = obj.Size
+	local ratio = math.max(s.X, s.Y, s.Z) / math.max(0.01, math.min(s.X, s.Y, s.Z))
+	if ratio > 2 then return false end  -- too elongated
+
+	-- Must be at least 1 stud (not a tiny hitbox)
+	if s.Magnitude < 1 then return false end
+
+	return true
+end
+
+-- Find the ball — locks onto ONE object and tracks it
+local lockedBall = nil
+
 local function findBall()
-	-- First try by name
+	-- If we already have a locked ball and it's still valid, keep it
+	if lockedBall and lockedBall.Parent and looksLikeBall(lockedBall) then
+		return lockedBall
+	end
+
+	-- Search for new ball
+	lockedBall = nil
 	for _, obj in pairs(workspace:GetDescendants()) do
-		if not isPlayerPart(obj) and looksLikeBall(obj) then
+		if looksLikeBall(obj) then
+			lockedBall = obj
+			if DEBUG then
+				print("[AutoCircle] Locked onto ball: " .. obj:GetFullName()
+					.. " shape=" .. tostring(obj:IsA("Part") and obj.Shape)
+					.. " size=" .. tostring(obj.Size))
+			end
 			return obj
 		end
 	end
@@ -303,11 +336,13 @@ local function update()
 	-- Reposition your ring
 	positionRing(myRing, origin, RADIUS)
 
-	-- Find ball (re-search every 0.5s)
+	-- Find ball — locks onto sphere, re-checks only if lost
 	local now = tick()
-	if not cachedBall or not cachedBall.Parent or now - ballSearchTick > 0.5 then
-		cachedBall = findBall()
-		ballSearchTick = now
+	if not cachedBall or not cachedBall.Parent or not looksLikeBall(cachedBall) then
+		if now - ballSearchTick > 0.3 then
+			cachedBall = findBall()
+			ballSearchTick = now
+		end
 	end
 	local ball = cachedBall
 
