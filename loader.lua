@@ -13,9 +13,6 @@
 -- ============================================================
 
 local BASE_URL  = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
-local BRIDGE_NAME      = "DexBridge"
-local BRIDGE_LIST_NAME = "DexBridgeList"
-local BRIDGE_FN_NAME   = "DexBridgeFn"
 
 -- ============================================================
 -- 1. HELPERS
@@ -392,85 +389,156 @@ end
 
 -- ============================================================
 -- 9. CLIENT <-> SERVER BRIDGE
+-- Self-creates all remotes, keeps them alive, never depends on
+-- a server script existing first.
 -- ============================================================
 
 local rs = service.ReplicatedStorage
-log("Bridge", "Setting up client<->server bridge...")
+log("Bridge", "=== Setting up client<->server bridge ===")
 
--- RemoteEvent: fire-and-forget messages to/from server
-local bridge = rs:FindFirstChild(BRIDGE_NAME)
-if bridge then
-	log("Bridge", "RemoteEvent '" .. BRIDGE_NAME .. "' already exists")
-else
-	-- Client can't create RemoteEvents on server — wait briefly for server script to create it
-	log("Bridge", "Waiting for server to create '" .. BRIDGE_NAME .. "' (up to 5s)...")
-	local waited = 0
-	while not bridge and waited < 5 do
-		bridge = rs:FindFirstChild(BRIDGE_NAME)
-		if not bridge then
-			task.wait(0.5)
-			waited = waited + 0.5
-		end
+--[[
+	REMOTE CREATION STRATEGY
+	========================
+	Executors with elevated access can parent Instances to
+	ReplicatedStorage directly from the client. We create each
+	remote if missing, then monitor it with a heartbeat loop
+	so it gets re-created if something destroys it.
+
+	Three remotes:
+	  DexBridge      RemoteEvent    fire-and-forget both directions
+	  DexBridgeList  RemoteFunction client requests server script list
+	  DexBridgeFn    RemoteFunction client invokes server actions
+]]
+
+local BRIDGE_NAME      = "DexBridge"
+local BRIDGE_LIST_NAME = "DexBridgeList"
+local BRIDGE_FN_NAME   = "DexBridgeFn"
+
+local bridge, bridgeListFn, bridgeFn
+
+local function createRemote(class, name)
+	local existing = rs:FindFirstChild(name)
+	if existing and existing:IsA(class) then
+		log("Bridge", name .. " already exists — reusing")
+		return existing
 	end
-	if bridge then
-		log("Bridge", "Server created '" .. BRIDGE_NAME .. "' after " .. waited .. "s ✓")
-	else
-		warn_tag("Bridge", "'" .. BRIDGE_NAME .. "' not found after 5s — server bridge script may not be running. Some features disabled.")
+	if existing then
+		-- Wrong class — destroy and recreate
+		warn_tag("Bridge", name .. " exists but wrong class (" .. existing.ClassName .. "), replacing...")
+		pcall(existing.Destroy, existing)
 	end
-end
 
--- RemoteFunction: request/response (e.g. listing server scripts)
-local bridgeListFn = rs:FindFirstChild(BRIDGE_LIST_NAME)
-if bridgeListFn then
-	log("Bridge", "RemoteFunction '" .. BRIDGE_LIST_NAME .. "' found ✓")
-else
-	warn_tag("Bridge", "'" .. BRIDGE_LIST_NAME .. "' not found — server-side script listing disabled")
-end
-
--- RemoteFunction: generic invoke (property set, script source push etc)
-local bridgeFn = rs:FindFirstChild(BRIDGE_FN_NAME)
-if bridgeFn then
-	log("Bridge", "RemoteFunction '" .. BRIDGE_FN_NAME .. "' found ✓")
-else
-	warn_tag("Bridge", "'" .. BRIDGE_FN_NAME .. "' not found — server invoke disabled")
-end
-
--- Listen for server → client messages
-if bridge and bridge:IsA("RemoteEvent") then
-	bridge.OnClientEvent:Connect(function(payload)
-		if type(payload) ~= "table" then
-			warn_tag("Bridge", "Received non-table payload from server: " .. type(payload))
-			return
-		end
-		log("Bridge", "← Server event received: type=" .. tostring(payload.Type))
-
-		if payload.Type == "ServerLog" then
-			-- Server pushed a log message to show in console
-			print(("[DexBridge][Server] %s"):format(tostring(payload.Message)))
-
-		elseif payload.Type == "ScriptSourcePush" then
-			-- Server pushed updated source for a script (e.g. after another admin edited it)
-			log("Bridge", "Script source push from server: " .. tostring(payload.Path))
-			-- ScriptViewer can pick this up if open
-
-		elseif payload.Type == "Ping" then
-			log("Bridge", "← Ping from server, sending pong...")
-			bridge:FireServer({Type="Pong", Time=tick()})
-		else
-			log("Bridge", "Unknown server payload type: " .. tostring(payload.Type))
-		end
+	local ok, inst = pcall(function()
+		local r = Instance.new(class)
+		r.Name = name
+		r.Parent = rs
+		return r
 	end)
+
+	if ok and inst then
+		log("Bridge", "Created " .. class .. " '" .. name .. "' in ReplicatedStorage ✓")
+		return inst
+	else
+		warn_tag("Bridge", "Failed to create " .. name .. ": " .. tostring(inst))
+		return nil
+	end
+end
+
+local function ensureRemotes()
+	bridge       = createRemote("RemoteEvent",    BRIDGE_NAME)
+	bridgeListFn = createRemote("RemoteFunction", BRIDGE_LIST_NAME)
+	bridgeFn     = createRemote("RemoteFunction", BRIDGE_FN_NAME)
+end
+
+-- Initial creation
+ensureRemotes()
+
+-- Keepalive loop — re-creates any remote that gets destroyed
+-- Runs every 2 seconds in a detached coroutine
+local keepaliveActive = true
+coroutine.wrap(function()
+	while keepaliveActive do
+		task.wait(2)
+		local changed = false
+
+		if not rs:FindFirstChild(BRIDGE_NAME) or not rs:FindFirstChild(BRIDGE_NAME):IsA("RemoteEvent") then
+			warn_tag("Bridge", BRIDGE_NAME .. " was destroyed — recreating...")
+			bridge = createRemote("RemoteEvent", BRIDGE_NAME)
+			-- Re-attach OnClientEvent after recreation
+			if bridge then
+				bridge.OnClientEvent:Connect(onClientEvent)
+				log("Bridge", "OnClientEvent re-attached after recreate")
+			end
+			changed = true
+		end
+
+		if not rs:FindFirstChild(BRIDGE_LIST_NAME) or not rs:FindFirstChild(BRIDGE_LIST_NAME):IsA("RemoteFunction") then
+			warn_tag("Bridge", BRIDGE_LIST_NAME .. " was destroyed — recreating...")
+			bridgeListFn = createRemote("RemoteFunction", BRIDGE_LIST_NAME)
+			changed = true
+		end
+
+		if not rs:FindFirstChild(BRIDGE_FN_NAME) or not rs:FindFirstChild(BRIDGE_FN_NAME):IsA("RemoteFunction") then
+			warn_tag("Bridge", BRIDGE_FN_NAME .. " was destroyed — recreating...")
+			bridgeFn = createRemote("RemoteFunction", BRIDGE_FN_NAME)
+			changed = true
+		end
+
+		if changed then
+			log("Bridge", "Keepalive cycle: remotes restored")
+		end
+	end
+end)()
+
+log("Bridge", "Keepalive loop started (2s interval)")
+
+-- ---- Client event handler (defined before keepalive so it can be re-attached) ----
+function onClientEvent(payload)
+	if type(payload) ~= "table" then
+		warn_tag("Bridge", "Non-table payload from server: " .. type(payload))
+		return
+	end
+
+	local pType = tostring(payload.Type)
+	log("Bridge", "<- Server: type=" .. pType)
+
+	if pType == "ServerLog" then
+		print(("[DexBridge][Server] %s"):format(tostring(payload.Message)))
+
+	elseif pType == "ScriptSourcePush" then
+		log("Bridge", "Script source push from server: " .. tostring(payload.Path))
+
+	elseif pType == "Ping" then
+		log("Bridge", "<- Ping from server, sending Pong...")
+		if bridge then
+			pcall(bridge.FireServer, bridge, {Type = "Pong", Time = tick()})
+		end
+
+	elseif pType == "Pong" then
+		local latency = payload.Time and (tick() - payload.Time) or -1
+		log("Bridge", "<- Pong from server, latency~=" .. string.format("%.3f", latency) .. "s")
+
+	else
+		log("Bridge", "Unknown server payload type: " .. pType)
+	end
+end
+
+-- Attach initial OnClientEvent listener
+if bridge then
+	bridge.OnClientEvent:Connect(onClientEvent)
 	log("Bridge", "OnClientEvent listener registered ✓")
 end
 
--- Helper: send payload to server
+-- ---- Helpers ----
+
 local function bridgeSend(payload)
-	if not bridge or not bridge:IsA("RemoteEvent") then
-		warn_tag("Bridge", "bridgeSend called but bridge not available")
+	local b = rs:FindFirstChild(BRIDGE_NAME)
+	if not b or not b:IsA("RemoteEvent") then
+		warn_tag("Bridge", "bridgeSend: remote not available")
 		return false
 	end
-	log("Bridge", "→ Sending to server: type=" .. tostring(payload.Type))
-	local ok, err = pcall(bridge.FireServer, bridge, payload)
+	log("Bridge", "-> Server: type=" .. tostring(payload.Type))
+	local ok, err = pcall(b.FireServer, b, payload)
 	if not ok then
 		warn_tag("Bridge", "FireServer failed: " .. tostring(err))
 		return false
@@ -478,55 +546,56 @@ local function bridgeSend(payload)
 	return true
 end
 
--- Helper: invoke server and get response
 local function bridgeInvoke(payload)
-	if not bridgeFn or not bridgeFn:IsA("RemoteFunction") then
-		warn_tag("Bridge", "bridgeInvoke called but '" .. BRIDGE_FN_NAME .. "' not available")
+	local fn = rs:FindFirstChild(BRIDGE_FN_NAME)
+	if not fn or not fn:IsA("RemoteFunction") then
+		warn_tag("Bridge", "bridgeInvoke: " .. BRIDGE_FN_NAME .. " not available")
 		return nil
 	end
-	log("Bridge", "→ Invoking server: type=" .. tostring(payload.Type))
-	local ok, result = pcall(bridgeFn.InvokeServer, bridgeFn, payload)
+	log("Bridge", "-> Invoke server: type=" .. tostring(payload.Type))
+	local ok, result = pcall(fn.InvokeServer, fn, payload)
 	if not ok then
 		warn_tag("Bridge", "InvokeServer failed: " .. tostring(result))
 		return nil
 	end
-	log("Bridge", "← Server invoke response received")
+	log("Bridge", "<- Invoke response received")
 	return result
 end
 
--- Helper: get server script list
 local function getServerScripts()
-	if not bridgeListFn or not bridgeListFn:IsA("RemoteFunction") then
-		warn_tag("Bridge", "getServerScripts: '" .. BRIDGE_LIST_NAME .. "' not available")
+	local fn = rs:FindFirstChild(BRIDGE_LIST_NAME)
+	if not fn or not fn:IsA("RemoteFunction") then
+		warn_tag("Bridge", "getServerScripts: " .. BRIDGE_LIST_NAME .. " not available")
 		return {}
 	end
-	log("Bridge", "→ Requesting server script list...")
-	local ok, result = pcall(bridgeListFn.InvokeServer, bridgeListFn)
+	log("Bridge", "-> Requesting server script list...")
+	local ok, result = pcall(fn.InvokeServer, fn)
 	if not ok then
 		warn_tag("Bridge", "getServerScripts failed: " .. tostring(result))
 		return {}
 	end
 	local count = type(result) == "table" and #result or 0
-	log("Bridge", "← Server returned " .. count .. " scripts")
+	log("Bridge", "<- Server returned " .. count .. " scripts")
 	return result or {}
 end
 
--- Send initial ping to confirm bridge is alive
-if bridge and bridge:IsA("RemoteEvent") then
-	log("Bridge", "→ Sending initial ping to server...")
-	bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
-end
+-- Send initial ping to confirm server bridge is alive
+log("Bridge", "Sending initial ping to server...")
+bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
 
--- Store bridge helpers on Main so modules can access them
+-- Store on Main for module access
 Main.Bridge = {
-	Send = bridgeSend,
-	Invoke = bridgeInvoke,
+	Send            = bridgeSend,
+	Invoke          = bridgeInvoke,
 	GetServerScripts = getServerScripts,
-	Event = bridge,
-	ListFn = bridgeListFn,
-	Fn = bridgeFn,
+	StopKeepalive   = function() keepaliveActive = false log("Bridge","Keepalive stopped") end,
 }
-log("Bridge", "Bridge setup complete")
+
+log("Bridge", "Bridge setup complete. Remotes: " ..
+	BRIDGE_NAME .. "=" .. tostring(rs:FindFirstChild(BRIDGE_NAME) ~= nil) .. "  " ..
+	BRIDGE_LIST_NAME .. "=" .. tostring(rs:FindFirstChild(BRIDGE_LIST_NAME) ~= nil) .. "  " ..
+	BRIDGE_FN_NAME .. "=" .. tostring(rs:FindFirstChild(BRIDGE_FN_NAME) ~= nil)
+)
 
 -- ============================================================
 -- 10. INIT ALL MODULES WITH FULL DEPS
