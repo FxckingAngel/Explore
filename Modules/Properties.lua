@@ -57,17 +57,71 @@ local function main()
 		return bridgeRemote
 	end
 
-	local function pushBridgePropEdit(obj, propName)
+	-- Serialize a value to something safe to send over RemoteEvent
+	local function serializeValue(val)
+		if val == nil then return {t="nil"} end
+		local vt = typeof(val)
+		if vt == "number" or vt == "boolean" or vt == "string" then
+			return {t=vt, v=val}
+		elseif vt == "Vector3" then
+			return {t="Vector3", x=val.X, y=val.Y, z=val.Z}
+		elseif vt == "Vector2" then
+			return {t="Vector2", x=val.X, y=val.Y}
+		elseif vt == "Color3" then
+			return {t="Color3", r=val.R, g=val.G, b=val.B}
+		elseif vt == "CFrame" then
+			local c = val.Components
+			return {t="CFrame", c={val:GetComponents()}}
+		elseif vt == "UDim" then
+			return {t="UDim", s=val.Scale, o=val.Offset}
+		elseif vt == "UDim2" then
+			return {t="UDim2", xs=val.X.Scale, xo=val.X.Offset, ys=val.Y.Scale, yo=val.Y.Offset}
+		elseif vt == "BrickColor" then
+			return {t="BrickColor", n=val.Number}
+		elseif vt == "EnumItem" then
+			return {t="EnumItem", et=tostring(val.EnumType), ev=val.Value}
+		elseif vt == "NumberRange" then
+			return {t="NumberRange", min=val.Min, max=val.Max}
+		elseif vt == "NumberSequence" then
+			local kps = {}
+			for _,kp in pairs(val.Keypoints) do
+				kps[#kps+1] = {t=kp.Time, v=kp.Value, e=kp.Envelope}
+			end
+			return {t="NumberSequence", kps=kps}
+		elseif vt == "ColorSequence" then
+			local kps = {}
+			for _,kp in pairs(val.Keypoints) do
+				kps[#kps+1] = {t=kp.Time, r=kp.Value.R, g=kp.Value.G, b=kp.Value.B}
+			end
+			return {t="ColorSequence", kps=kps}
+		elseif vt == "Rect" then
+			return {t="Rect", x0=val.Min.X, y0=val.Min.Y, x1=val.Max.X, y1=val.Max.Y}
+		elseif vt == "Ray" then
+			return {t="Ray", ox=val.Origin.X, oy=val.Origin.Y, oz=val.Origin.Z, dx=val.Direction.X, dy=val.Direction.Y, dz=val.Direction.Z}
+		elseif vt == "PhysicalProperties" then
+			return {t="PhysicalProperties", d=val.Density, f=val.Friction, e=val.Elasticity, fw=val.FrictionWeight, ew=val.ElasticityWeight}
+		elseif vt == "Instance" then
+			local path2 = ""
+			pcall(function() path2 = val:GetFullName() end)
+			return {t="Instance", path=path2}
+		end
+		return {t="string", v=tostring(val)}
+	end
+
+	local function pushBridgePropEdit(obj, propName, finalVal)
 		if not Settings.Properties.LiveEditMode then return end
 		local remote = resolveBridge()
 		if not remote or not remote:IsA("RemoteEvent") then return end
 		local path = ""
 		pcall(function() path = obj:GetFullName() end)
+		local serialized = serializeValue(finalVal)
+		print("[DexBridge] -> PropertyChanged " .. path .. "." .. tostring(propName) .. " = " .. tostring(finalVal))
 		remote:FireServer({
 			Type = "PropertiesLiveEdit",
-			Action = "PropertyChanged:"..tostring(propName),
+			Action = "PropertyChanged:" .. tostring(propName),
 			TargetPath = path,
 			TargetName = obj and obj.Name or "",
+			Value = serialized,
 			Time = os.time(),
 		})
 	end
@@ -1374,7 +1428,7 @@ local function main()
 
 						if prop.IsAttribute then setAttribute(obj,attributeName,setVal)
 						else obj[propName] = setVal end
-						pushBridgePropEdit(obj, propName)
+						pushBridgePropEdit(obj, prop.IsAttribute and ("Attribute:"..tostring(attributeName)) or tostring(propName), setVal)
 					end)
 				end
 			end

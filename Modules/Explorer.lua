@@ -62,19 +62,25 @@ local function main()
 		return bridgeRemote
 	end
 
-	local function pushBridgeAction(action, obj)
+	local function pushBridgeAction(action, obj, extra)
 		if not Settings.Explorer.LiveEditMode then return end
 		local remote = resolveBridge()
 		if not remote or not remote:IsA("RemoteEvent") then return end
 		local path = ""
 		pcall(function() path = obj:GetFullName() end)
-		remote:FireServer({
+		local payload = {
 			Type = "ExplorerLiveEdit",
 			Action = action,
 			TargetPath = path,
 			TargetName = obj and obj.Name or "",
 			Time = os.time(),
-		})
+		}
+		-- Merge any extra fields (e.g. NewParent, NewName, Value)
+		if type(extra) == "table" then
+			for k,v in pairs(extra) do payload[k] = v end
+		end
+		print("[DexBridge] -> ExplorerLiveEdit action=" .. tostring(action) .. " path=" .. path)
+		remote:FireServer(payload)
 	end
 
 	addObject = function(root)
@@ -300,7 +306,14 @@ local function main()
 
 		renameBox.FocusLost:Connect(function()
 			if not renamingNode then return end
-			pcall(function() renamingNode.Obj.Name = renameBox.Text end)
+			local obj = renamingNode.Obj
+			local newName = renameBox.Text
+			local oldName = obj.Name
+			pcall(function() obj.Name = newName end)
+			if newName ~= oldName then
+				print("[DexBridge] Rename: " .. tostring(oldName) .. " -> " .. tostring(newName) .. " at " .. tostring(obj:GetFullName()))
+				pushBridgeAction("Rename", obj, {NewName = newName, OldName = oldName})
+			end
 			renamingNode = nil
 			Explorer.Refresh()
 		end)
@@ -528,10 +541,16 @@ local function main()
 						if node then
 							if selection.Map[node] then return end
 							local newPar = node.Obj
+							local newParPath = ""
+							pcall(function() newParPath = newPar:GetFullName() end)
 							local sList = selection.List
 							for i = 1,#sList do
 								local n = sList[i]
+								local oldPath = ""
+								pcall(function() oldPath = n.Obj:GetFullName() end)
 								pcall(function() n.Obj.Parent = newPar end)
+								print("[DexBridge] -> Reparent: " .. oldPath .. " -> parent=" .. newParPath)
+								pushBridgeAction("Reparent", n.Obj, {NewParentPath=newParPath, OldPath=oldPath})
 							end
 							Explorer.ViewNode(sList[1])
 						end
@@ -884,8 +903,12 @@ local function main()
 			local count=1
 			for i=1,#sList do
 				local inst=sList[i].Obj
+				local path=""
+				pcall(function() path=inst:GetFullName() end)
 				local s,cloned=pcall(clone,inst)
 				if s and cloned then newClipboard[count]=cloned count=count+1 end
+				print("[DexBridge] Cut/Delete: " .. path)
+				pushBridgeAction("Delete", inst)
 				pcall(destroy,inst)
 			end
 			clipboard=newClipboard
@@ -950,8 +973,12 @@ local function main()
 			local destroy=game.Destroy
 			local sList=selection.List
 			for i=1,#sList do
-				pushBridgeAction("Delete", sList[i].Obj)
-				pcall(destroy,sList[i].Obj)
+				local obj = sList[i].Obj
+				local path = ""
+				pcall(function() path = obj:GetFullName() end)
+				print("[DexBridge] -> Delete: " .. path)
+				pushBridgeAction("Delete", obj)
+				pcall(destroy, obj)
 			end
 			selection:Clear()
 		end})

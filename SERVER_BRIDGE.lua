@@ -2,18 +2,16 @@
 	Dex Server Bridge — FxckingAngel/Explore
 	
 	Place this Script in ServerScriptService.
-	It creates the RemoteEvent/RemoteFunction instances the client loader expects,
-	and handles all client -> server messages with detailed prints so you can
-	see exactly what's happening on the server side.
+	Handles all client -> server live edit events and applies them in real-time.
 	
-	Bridge objects created in ReplicatedStorage:
-	  DexBridge      — RemoteEvent  (fire-and-forget both directions)
-	  DexBridgeList  — RemoteFunction (client requests server script list)
-	  DexBridgeFn    — RemoteFunction (client invokes server actions)
+	Remotes in ReplicatedStorage:
+	  DexBridge      — RemoteEvent  (fire-and-forget)
+	  DexBridgeList  — RemoteFunction (script list)
+	  DexBridgeFn    — RemoteFunction (invoke actions)
 ]]
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players           = game:GetService("Players")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local Players             = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local BRIDGE_NAME      = "DexBridge"
@@ -27,7 +25,6 @@ local BRIDGE_FN_NAME   = "DexBridgeFn"
 local function log(tag, msg)
 	print(("[DexServer][%s] %s"):format(tag, tostring(msg)))
 end
-
 local function warn_tag(tag, msg)
 	warn(("[DexServer][%s] %s"):format(tag, tostring(msg)))
 end
@@ -40,14 +37,15 @@ log("Init", "=== Dex Server Bridge starting ===")
 
 local function getOrCreate(class, name, parent)
 	local existing = parent:FindFirstChild(name)
-	if existing then
-		log("Init", name .. " already exists, reusing")
+	if existing and existing:IsA(class) then
+		log("Init", name .. " already exists")
 		return existing
 	end
+	if existing then pcall(existing.Destroy, existing) end
 	local inst = Instance.new(class)
 	inst.Name = name
 	inst.Parent = parent
-	log("Init", "Created " .. class .. " '" .. name .. "' in " .. parent.Name)
+	log("Init", "Created " .. class .. " '" .. name .. "'")
 	return inst
 end
 
@@ -61,158 +59,266 @@ log("Init", "All remotes ready")
 -- HELPERS
 -- ============================================================
 
-local function getPlayerName(player)
+local function playerName(player)
 	return player and player.Name or "unknown"
 end
 
--- Walk a dot-separated path from game root
 local function findByPath(path)
 	if type(path) ~= "string" or path == "" then return nil end
 	local cur = game
 	for part in path:gmatch("[^%.]+") do
 		if cur == game and part == "game" then continue end
 		cur = cur:FindFirstChild(part)
-		if not cur then
-			warn_tag("Path", "Could not find child '" .. part .. "' in path: " .. path)
-			return nil
-		end
+		if not cur then return nil end
 	end
 	return cur
 end
 
--- Send a message back to a specific client
 local function sendToClient(player, payload)
-	log("Bridge", "← Sending to " .. getPlayerName(player) .. ": type=" .. tostring(payload.Type))
-	local ok, err = pcall(bridge.FireClient, bridge, player, payload)
-	if not ok then
-		warn_tag("Bridge", "FireClient failed for " .. getPlayerName(player) .. ": " .. tostring(err))
-	end
+	pcall(bridge.FireClient, bridge, player, payload)
 end
 
 -- ============================================================
--- CLIENT -> SERVER EVENT HANDLER
+-- VALUE DESERIALIZER
+-- Reconstructs Roblox types from the serialized table the
+-- client sends (mirrors serializeValue() in Properties.lua)
+-- ============================================================
+
+local function deserializeValue(s)
+	if type(s) ~= "table" then return s end
+	local t = s.t
+	if t == "nil" then return nil
+	elseif t == "number" or t == "boolean" or t == "string" then return s.v
+	elseif t == "Vector3" then return Vector3.new(s.x, s.y, s.z)
+	elseif t == "Vector2" then return Vector2.new(s.x, s.y)
+	elseif t == "Color3" then return Color3.new(s.r, s.g, s.b)
+	elseif t == "CFrame" then
+		if type(s.c) == "table" then
+			return CFrame.new(table.unpack(s.c))
+		end
+		return CFrame.new()
+	elseif t == "UDim" then return UDim.new(s.s, s.o)
+	elseif t == "UDim2" then return UDim2.new(s.xs, s.xo, s.ys, s.yo)
+	elseif t == "BrickColor" then return BrickColor.new(s.n)
+	elseif t == "EnumItem" then
+		local ok, item = pcall(function()
+			return Enum[s.et]:FromValue(s.ev)
+		end)
+		return ok and item or nil
+	elseif t == "NumberRange" then return NumberRange.new(s.min, s.max)
+	elseif t == "NumberSequence" then
+		local kps = {}
+		for _, kp in ipairs(s.kps or {}) do
+			kps[#kps+1] = NumberSequenceKeypoint.new(kp.t, kp.v, kp.e or 0)
+		end
+		return NumberSequence.new(kps)
+	elseif t == "ColorSequence" then
+		local kps = {}
+		for _, kp in ipairs(s.kps or {}) do
+			kps[#kps+1] = ColorSequenceKeypoint.new(kp.t, Color3.new(kp.r, kp.g, kp.b))
+		end
+		return ColorSequence.new(kps)
+	elseif t == "Rect" then
+		return Rect.new(s.x0, s.y0, s.x1, s.y1)
+	elseif t == "Ray" then
+		return Ray.new(Vector3.new(s.ox, s.oy, s.oz), Vector3.new(s.dx, s.dy, s.dz))
+	elseif t == "PhysicalProperties" then
+		return PhysicalProperties.new(s.d, s.f, s.e, s.fw, s.ew)
+	elseif t == "Instance" then
+		return findByPath(s.path)
+	end
+	return tostring(s.v or "")
+end
+
+-- ============================================================
+-- MAIN EVENT HANDLER
 -- ============================================================
 
 bridge.OnServerEvent:Connect(function(player, payload)
 	if type(payload) ~= "table" then
-		warn_tag("Bridge", "Non-table payload from " .. getPlayerName(player) .. ": " .. type(payload))
+		warn_tag("Bridge", "Non-table payload from " .. playerName(player))
 		return
 	end
 
-	local pType = tostring(payload.Type)
-	log("Bridge", "→ Event from " .. getPlayerName(player) .. ": type=" .. pType)
+	local pType = tostring(payload.Type or "")
+	local path  = tostring(payload.TargetPath or "")
 
-	-- ---- Ping / Pong ----
+	-- ---- Ping ----
 	if pType == "Ping" then
-		log("Bridge", "Ping received from " .. getPlayerName(player) .. " at t=" .. tostring(payload.Time))
-		sendToClient(player, {Type = "Pong", Time = tick(), ServerTime = os.clock()})
-		log("Bridge", "Pong sent to " .. getPlayerName(player))
+		log("Bridge", "Ping from " .. playerName(player))
+		sendToClient(player, {Type="Pong", Time=tick()})
+		return
 
 	elseif pType == "Pong" then
-		local latency = payload.Time and (tick() - payload.Time) or -1
-		log("Bridge", "Pong back from " .. getPlayerName(player) .. " latency~=" .. string.format("%.3f", latency) .. "s")
+		log("Bridge", "Pong from " .. playerName(player))
+		return
+	end
 
-	-- ---- Script Source Push (client wants to update a server script's source) ----
-	elseif pType == "ScriptViewerSync" then
-		local path   = tostring(payload.TargetPath or "")
+	-- ---- ExplorerLiveEdit ----
+	if pType == "ExplorerLiveEdit" then
+		local action = tostring(payload.Action or "")
+		log("Explorer", playerName(player) .. " action=" .. action .. " path=" .. path)
+
+		-- DELETE
+		if action == "Delete" then
+			local target = findByPath(path)
+			if not target then
+				warn_tag("Explorer", "Delete: not found: " .. path)
+				sendToClient(player, {Type="ServerLog", Message="[Error] Not found: " .. path})
+				return
+			end
+			local ok, err = pcall(target.Destroy, target)
+			if ok then
+				log("Explorer", "Deleted: " .. path)
+				sendToClient(player, {Type="ServerLog", Message="[OK] Deleted: " .. path})
+			else
+				warn_tag("Explorer", "Delete failed: " .. tostring(err))
+				sendToClient(player, {Type="ServerLog", Message="[Error] Delete failed: " .. tostring(err)})
+			end
+
+		-- RENAME
+		elseif action == "Rename" then
+			local target = findByPath(path)
+			local newName = tostring(payload.NewName or "")
+			if not target then
+				warn_tag("Explorer", "Rename: not found: " .. path)
+				sendToClient(player, {Type="ServerLog", Message="[Error] Not found: " .. path})
+				return
+			end
+			if newName == "" then
+				sendToClient(player, {Type="ServerLog", Message="[Error] Empty name"})
+				return
+			end
+			local ok, err = pcall(function() target.Name = newName end)
+			if ok then
+				log("Explorer", "Renamed " .. path .. " -> " .. newName)
+				sendToClient(player, {Type="ServerLog", Message="[OK] Renamed to: " .. newName})
+			else
+				warn_tag("Explorer", "Rename failed: " .. tostring(err))
+				sendToClient(player, {Type="ServerLog", Message="[Error] Rename failed: " .. tostring(err)})
+			end
+
+		-- REPARENT
+		elseif action == "Reparent" then
+			local target    = findByPath(path)
+			local newParent = findByPath(tostring(payload.NewParentPath or ""))
+			if not target then
+				warn_tag("Explorer", "Reparent: target not found: " .. path)
+				sendToClient(player, {Type="ServerLog", Message="[Error] Target not found: " .. path})
+				return
+			end
+			if not newParent then
+				warn_tag("Explorer", "Reparent: parent not found: " .. tostring(payload.NewParentPath))
+				sendToClient(player, {Type="ServerLog", Message="[Error] Parent not found: " .. tostring(payload.NewParentPath)})
+				return
+			end
+			local ok, err = pcall(function() target.Parent = newParent end)
+			if ok then
+				log("Explorer", "Reparented " .. path .. " -> " .. tostring(payload.NewParentPath))
+				sendToClient(player, {Type="ServerLog", Message="[OK] Reparented to: " .. tostring(payload.NewParentPath)})
+			else
+				warn_tag("Explorer", "Reparent failed: " .. tostring(err))
+				sendToClient(player, {Type="ServerLog", Message="[Error] Reparent failed: " .. tostring(err)})
+			end
+
+		else
+			log("Explorer", "Unknown Explorer action: " .. action)
+		end
+
+		return
+	end
+
+	-- ---- PropertiesLiveEdit ----
+	if pType == "PropertiesLiveEdit" then
+		local action = tostring(payload.Action or "")
+		log("Properties", playerName(player) .. " action=" .. action .. " path=" .. path)
+
+		-- PropertyChanged:PropName
+		if action:sub(1,16) == "PropertyChanged:" then
+			local propName = action:sub(17)
+			local target = findByPath(path)
+
+			if not target then
+				warn_tag("Properties", "Target not found: " .. path)
+				sendToClient(player, {Type="ServerLog", Message="[Error] Not found: " .. path})
+				return
+			end
+
+			-- Deserialize the value
+			local value = deserializeValue(payload.Value)
+
+			-- Handle attribute edits (propName starts with "Attribute:")
+			if propName:sub(1,10) == "Attribute:" then
+				local attrName = propName:sub(11)
+				local ok, err = pcall(function()
+					target:SetAttribute(attrName, value)
+				end)
+				if ok then
+					log("Properties", "Attribute '" .. attrName .. "' set on " .. path .. " = " .. tostring(value))
+					sendToClient(player, {Type="ServerLog", Message="[OK] Attr " .. attrName .. " = " .. tostring(value)})
+				else
+					warn_tag("Properties", "Attribute set failed: " .. tostring(err))
+					sendToClient(player, {Type="ServerLog", Message="[Error] " .. attrName .. " failed: " .. tostring(err)})
+				end
+			else
+				-- Regular property
+				local ok, err = pcall(function()
+					target[propName] = value
+				end)
+				if ok then
+					log("Properties", "'" .. propName .. "' set on " .. path .. " = " .. tostring(value))
+					sendToClient(player, {Type="ServerLog", Message="[OK] " .. propName .. " = " .. tostring(value)})
+				else
+					warn_tag("Properties", "Property set failed for " .. propName .. ": " .. tostring(err))
+					sendToClient(player, {Type="ServerLog", Message="[Error] " .. propName .. " failed: " .. tostring(err)})
+				end
+			end
+
+		else
+			log("Properties", "Unknown Properties action: " .. action)
+		end
+
+		return
+	end
+
+	-- ---- ScriptViewerSync ----
+	if pType == "ScriptViewerSync" then
 		local source = payload.Source
-
 		if type(source) ~= "string" then
-			warn_tag("Bridge", "ScriptViewerSync from " .. getPlayerName(player) .. " — Source is not a string")
+			warn_tag("Script", "ScriptViewerSync: Source is not a string")
+			sendToClient(player, {Type="ServerLog", Message="[Error] Source must be a string"})
 			return
 		end
-
-		log("Bridge", "ScriptViewerSync from " .. getPlayerName(player) .. " target=" .. path .. " source_len=" .. #source)
-
 		local target = findByPath(path)
-		if not target then
-			warn_tag("Bridge", "ScriptViewerSync: target not found: " .. path)
-			sendToClient(player, {Type="ServerLog", Message="[Error] Script not found: " .. path})
-			return
-		end
-		if not target:IsA("LuaSourceContainer") then
-			warn_tag("Bridge", "ScriptViewerSync: target is not a LuaSourceContainer: " .. path)
+		if not target or not target:IsA("LuaSourceContainer") then
+			warn_tag("Script", "ScriptViewerSync: not a script: " .. path)
 			sendToClient(player, {Type="ServerLog", Message="[Error] Not a script: " .. path})
 			return
 		end
-
 		local ok, err = pcall(function() target.Source = source end)
 		if ok then
-			log("Bridge", "Source applied to " .. path .. " (" .. #source .. " bytes)")
+			log("Script", "Source updated: " .. path .. " (" .. #source .. " bytes)")
 			sendToClient(player, {Type="ServerLog", Message="[OK] Source updated: " .. path})
 		else
-			warn_tag("Bridge", "Source apply failed for " .. path .. ": " .. tostring(err))
-			sendToClient(player, {Type="ServerLog", Message="[Error] Failed to apply source: " .. tostring(err)})
+			warn_tag("Script", "Source update failed: " .. tostring(err))
+			sendToClient(player, {Type="ServerLog", Message="[Error] Source update failed: " .. tostring(err)})
 		end
-
-	-- ---- Explorer Live Edit: Delete ----
-	elseif pType == "ExplorerLiveEdit" and payload.Action == "Delete" then
-		local path = tostring(payload.TargetPath or "")
-		log("Bridge", "ExplorerLiveEdit Delete from " .. getPlayerName(player) .. " target=" .. path)
-
-		local target = findByPath(path)
-		if not target then
-			warn_tag("Bridge", "Delete: target not found: " .. path)
-			sendToClient(player, {Type="ServerLog", Message="[Error] Not found: " .. path})
-			return
-		end
-
-		local ok, err = pcall(target.Destroy, target)
-		if ok then
-			log("Bridge", "Destroyed: " .. path)
-			sendToClient(player, {Type="ServerLog", Message="[OK] Destroyed: " .. path})
-		else
-			warn_tag("Bridge", "Destroy failed for " .. path .. ": " .. tostring(err))
-			sendToClient(player, {Type="ServerLog", Message="[Error] Destroy failed: " .. tostring(err)})
-		end
-
-	-- ---- Explorer Live Edit: Property Change ----
-	elseif pType == "ExplorerLiveEdit" and type(payload.Action) == "string" and payload.Action:sub(1,16) == "PropertyChanged:" then
-		local path     = tostring(payload.TargetPath or "")
-		local propName = payload.Action:sub(17)
-		local value    = payload.Value
-
-		log("Bridge", "PropertyChanged from " .. getPlayerName(player) .. " target=" .. path .. " prop=" .. propName .. " value=" .. tostring(value))
-
-		local target = findByPath(path)
-		if not target then
-			warn_tag("Bridge", "PropertyChanged: target not found: " .. path)
-			sendToClient(player, {Type="ServerLog", Message="[Error] Not found: " .. path})
-			return
-		end
-
-		local ok, err = pcall(function() target[propName] = value end)
-		if ok then
-			log("Bridge", "Property '" .. propName .. "' set on " .. path)
-			sendToClient(player, {Type="ServerLog", Message="[OK] " .. propName .. " set on " .. path})
-		else
-			warn_tag("Bridge", "Property set failed: " .. tostring(err))
-			sendToClient(player, {Type="ServerLog", Message="[Error] " .. propName .. " set failed: " .. tostring(err)})
-		end
-
-	-- ---- Properties Live Edit ----
-	elseif pType == "PropertiesLiveEdit" then
-		log("Bridge", "PropertiesLiveEdit from " .. getPlayerName(player) .. " action=" .. tostring(payload.Action) .. " target=" .. tostring(payload.TargetPath))
-		-- Forwarded to PropertyChanged handler above if needed
-		sendToClient(player, {Type="ServerLog", Message="[Info] PropertiesLiveEdit received: " .. tostring(payload.Action)})
-
-	-- ---- Unknown ----
-	else
-		warn_tag("Bridge", "Unknown event type '" .. pType .. "' from " .. getPlayerName(player))
+		return
 	end
+
+	warn_tag("Bridge", "Unknown payload type '" .. pType .. "' from " .. playerName(player))
 end)
 
 log("Bridge", "OnServerEvent handler registered")
 
 -- ============================================================
--- SERVER SCRIPT LIST (DexBridgeList)
+-- SCRIPT LIST
 -- ============================================================
 
 bridgeList.OnServerInvoke = function(player)
-	log("List", "Script list requested by " .. getPlayerName(player))
-
+	log("List", "Requested by " .. playerName(player))
 	local out = {}
-	local ok, err = pcall(function()
+	pcall(function()
 		for _, obj in ipairs(ServerScriptService:GetDescendants()) do
 			if obj:IsA("LuaSourceContainer") then
 				out[#out+1] = {
@@ -225,119 +331,67 @@ bridgeList.OnServerInvoke = function(player)
 			end
 		end
 	end)
-
-	if not ok then
-		warn_tag("List", "GetDescendants failed: " .. tostring(err))
-		return {}
-	end
-
-	log("List", "Returning " .. #out .. " scripts to " .. getPlayerName(player))
+	log("List", "Returning " .. #out .. " scripts to " .. playerName(player))
 	return out
 end
 
-log("List", "DexBridgeList handler registered")
-
 -- ============================================================
--- GENERIC INVOKE (DexBridgeFn)
+-- GENERIC INVOKE
 -- ============================================================
 
 bridgeFn.OnServerInvoke = function(player, payload)
-	if type(payload) ~= "table" then
-		warn_tag("Fn", "Non-table invoke from " .. getPlayerName(player))
-		return {Success=false, Error="payload must be a table"}
-	end
-
+	if type(payload) ~= "table" then return {Success=false, Error="payload must be table"} end
 	local pType = tostring(payload.Type or "")
-	log("Fn", "Invoke from " .. getPlayerName(player) .. ": type=" .. pType)
+	log("Fn", playerName(player) .. " type=" .. pType)
 
-	-- Get script source
 	if pType == "GetSource" then
-		local path = tostring(payload.Path or "")
-		log("Fn", "GetSource: " .. path)
-
-		local target = findByPath(path)
+		local target = findByPath(tostring(payload.Path or ""))
 		if not target or not target:IsA("LuaSourceContainer") then
-			warn_tag("Fn", "GetSource: not found or not a script: " .. path)
-			return {Success=false, Error="Not found: " .. path}
+			return {Success=false, Error="Not a script: " .. tostring(payload.Path)}
 		end
+		local ok, src = pcall(function() return target.Source end)
+		if not ok then return {Success=false, Error=tostring(src)} end
+		log("Fn", "GetSource " .. tostring(payload.Path) .. " (" .. #src .. " bytes)")
+		return {Success=true, Source=src, Path=payload.Path}
 
-		local src = ""
-		local ok, err = pcall(function() src = target.Source end)
-		if not ok then
-			warn_tag("Fn", "GetSource read failed: " .. tostring(err))
-			return {Success=false, Error=tostring(err)}
-		end
-
-		log("Fn", "GetSource returning " .. #src .. " bytes for " .. path)
-		return {Success=true, Source=src, Path=path}
-
-	-- Set property
 	elseif pType == "SetProperty" then
-		local path     = tostring(payload.Path or "")
-		local propName = tostring(payload.Property or "")
-		local value    = payload.Value
-
-		log("Fn", "SetProperty: " .. path .. "." .. propName .. " = " .. tostring(value))
-
-		local target = findByPath(path)
-		if not target then
-			return {Success=false, Error="Not found: " .. path}
-		end
-
-		local ok, err = pcall(function() target[propName] = value end)
+		local target = findByPath(tostring(payload.Path or ""))
+		if not target then return {Success=false, Error="Not found: " .. tostring(payload.Path)} end
+		local value = deserializeValue(payload.Value)
+		local ok, err = pcall(function() target[tostring(payload.Property)] = value end)
 		if ok then
-			log("Fn", "SetProperty OK: " .. path .. "." .. propName)
+			log("Fn", "SetProperty " .. tostring(payload.Property) .. " on " .. tostring(payload.Path))
 			return {Success=true}
-		else
-			warn_tag("Fn", "SetProperty failed: " .. tostring(err))
-			return {Success=false, Error=tostring(err)}
 		end
+		return {Success=false, Error=tostring(err)}
 
-	-- Call a function on an object
 	elseif pType == "CallMethod" then
-		local path   = tostring(payload.Path or "")
+		local target = findByPath(tostring(payload.Path or ""))
+		if not target then return {Success=false, Error="Not found: " .. tostring(payload.Path)} end
 		local method = tostring(payload.Method or "")
-		local args   = type(payload.Args) == "table" and payload.Args or {}
-
-		log("Fn", "CallMethod: " .. path .. ":" .. method .. "(" .. #args .. " args)")
-
-		local target = findByPath(path)
-		if not target then
-			return {Success=false, Error="Not found: " .. path}
-		end
-
 		local fn = target[method]
-		if type(fn) ~= "function" then
-			return {Success=false, Error="Method not found: " .. method}
-		end
-
-		local ok, result = pcall(fn, target, unpack(args))
+		if type(fn) ~= "function" then return {Success=false, Error="No method: " .. method} end
+		local args = type(payload.Args) == "table" and payload.Args or {}
+		local ok, result = pcall(fn, target, table.unpack(args))
 		if ok then
-			log("Fn", "CallMethod OK: " .. path .. ":" .. method)
+			log("Fn", "CallMethod " .. method .. " on " .. tostring(payload.Path))
 			return {Success=true, Result=tostring(result)}
-		else
-			warn_tag("Fn", "CallMethod failed: " .. tostring(result))
-			return {Success=false, Error=tostring(result)}
 		end
-
-	else
-		warn_tag("Fn", "Unknown invoke type: " .. pType)
-		return {Success=false, Error="Unknown type: " .. pType}
+		return {Success=false, Error=tostring(result)}
 	end
-end
 
-log("Fn", "DexBridgeFn handler registered")
+	return {Success=false, Error="Unknown type: " .. pType}
+end
 
 -- ============================================================
 -- PLAYER TRACKING
 -- ============================================================
 
-Players.PlayerAdded:Connect(function(player)
-	log("Players", player.Name .. " joined — bridge available")
+Players.PlayerAdded:Connect(function(p)
+	log("Players", p.Name .. " joined")
 end)
-
-Players.PlayerRemoving:Connect(function(player)
-	log("Players", player.Name .. " left")
+Players.PlayerRemoving:Connect(function(p)
+	log("Players", p.Name .. " left")
 end)
 
 -- ============================================================
@@ -345,4 +399,4 @@ end)
 -- ============================================================
 
 log("Init", "=== Dex Server Bridge ready ===")
-log("Init", "Listening on: " .. BRIDGE_NAME .. ", " .. BRIDGE_LIST_NAME .. ", " .. BRIDGE_FN_NAME)
+log("Init", "Listening: " .. BRIDGE_NAME .. " | " .. BRIDGE_LIST_NAME .. " | " .. BRIDGE_FN_NAME)
