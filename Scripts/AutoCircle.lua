@@ -36,13 +36,12 @@ local BALL_RING_C  = Color3.fromRGB(255, 200, 0)
 --   - Occasional late/miss is human — but less so at high speed (panic mode)
 --   - Fatigue: long rallies make you slightly slower then you recover
 local HUMAN = {
-	-- Reaction time at LOW ball speed (slow ball = relaxed, ~200-350ms)
-	ReactionSlow    = {min=0.18, max=0.34},
+	-- Reaction time at LOW ball speed (~150-250ms — deathball is always fast)
+	ReactionSlow    = {min=0.12, max=0.22},
 
-	-- Reaction time at HIGH ball speed (fast ball = panic, ~120-200ms)
-	-- Ball speed threshold where panic kicks in (studs/s)
-	PanicSpeed      = 60,
-	ReactionFast    = {min=0.11, max=0.21},
+	-- Reaction time at HIGH ball speed (panic ~80-150ms)
+	PanicSpeed      = 80,
+	ReactionFast    = {min=0.07, max=0.14},
 
 	-- Miss chance at low speed (8%) — drops toward 0 as ball gets fast
 	-- At panic speed: miss chance = 0 (you HAVE to hit it)
@@ -318,7 +317,7 @@ local function triggerF(ball)
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 
-	-- Miss check — fast ball = almost never miss, slow ball = sometimes miss
+	-- Miss check
 	local missChance = getMissChance(speed)
 	if math.random() < missChance then
 		if DEBUG then
@@ -327,15 +326,44 @@ local function triggerF(ball)
 		return
 	end
 
-	-- Human reaction delay — tightens as ball speeds up
+	-- Record ball position at moment of detection
+	local entryPos  = ball.Position
+	local entryVel  = ball.AssemblyLinearVelocity
+
+	-- Human reaction delay
 	local delay = getReactionTime(speed)
 	humanState.pending = true
 
 	task.delay(delay, function()
 		humanState.pending = false
-		-- Recover fatigue while idle between hits
+
+		-- Ball must still exist
+		if not ball or not ball.Parent then return end
+
+		local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+
+		-- Check if ball is still within reach (extended range — it may have passed through)
+		-- Use predicted position: where was it heading?
+		local currentDist = (ball.Position - root.Position).Magnitude
+		local predictedPos = entryPos + entryVel * delay
+		local predictedDist = (predictedPos - root.Position).Magnitude
+
+		-- Hit if ball is nearby OR was passing through (predicted path came close)
+		local inRange = currentDist <= RADIUS + BAND + speed * delay * 0.5
+		local wasNear = predictedDist <= RADIUS + BAND * 2
+
+		if not inRange and not wasNear then
+			if DEBUG then
+				print(("[AutoCircle] TOO LATE — ball at %.1f studs (predicted %.1f)"):format(currentDist, predictedDist))
+			end
+			return
+		end
+
+		-- Recover fatigue
 		local idleTime = tick() - humanState.lastHitTime
 		humanState.fatigue = math.max(0, humanState.fatigue - HUMAN.FatigueDecay * idleTime)
+
 		doHit(ball)
 	end)
 end
