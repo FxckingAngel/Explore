@@ -614,104 +614,128 @@ local function injectServerBridge()
 	local injected = false
 	local sss = game:GetService("ServerScriptService")
 
-	-- ── Attempt every known run_on_server variant ───────────────────────────────
-	-- Covers: Solara, Synapse X compat, KRNL, ScriptWare, Fluxus, Wave, Celery
-	-- Solara maintains Synapse X API compatibility so syn.run_on_server works,
-	-- but also exposes run_on_server globally and via solara namespace.
-	local serverRunFuncs = {
-		-- Global variants (Solara, some others expose globally)
-		rawget(_G, "run_on_server"),
-		rawget(_G, "execute_on_server"),
-		rawget(_G, "RunOnServer"),
-		-- Synapse X / Solara namespace
-		type(rawget(_G,"syn"))=="table"  and rawget(rawget(_G,"syn"),  "run_on_server") or nil,
-		-- Solara namespace
-		type(rawget(_G,"solara"))=="table" and rawget(rawget(_G,"solara"),"run_on_server") or nil,
-		-- Fluxus namespace
-		type(rawget(_G,"fluxus"))=="table" and rawget(rawget(_G,"fluxus"),"run_on_server") or nil,
-		-- Wave namespace
-		type(rawget(_G,"wave"))=="table" and rawget(rawget(_G,"wave"),"run_on_server") or nil,
-		-- Celery namespace
-		type(rawget(_G,"celery"))=="table" and rawget(rawget(_G,"celery"),"run_on_server") or nil,
-	}
+	-- ── Method 1: setscriptable + Source overwrite + Disabled toggle ──────────
+	-- CONFIRMED WORKING on Solara:
+	--   setscriptable(script, "Source", true) -> true true
+	--   script.Source = src                   -> true nil
+	-- We find any running server Script, save its original source,
+	-- overwrite with bridge code, toggle Disabled to re-run it,
+	-- then restore original source so the game keeps working.
+	if not injected then
+		-- Priority targets: simple top-level workspace scripts that are unlikely
+		-- to break the game if briefly interrupted
+		local priorityNames = {
+			"StudioForce", "StudioXPGive", "StudioEventForce",
+			"Script", "DiscordJoinRewardHandler", "LikeRewardHandler"
+		}
+		local targets = {}
 
-	for i, fn in pairs(serverRunFuncs) do
-		if not injected and type(fn) == "function" then
-			log("Bridge", "Trying server run function #"..i.."...")
-			local ok2, err = pcall(fn, src)
-			if ok2 then
-				log("Bridge", "Server injection ✓ via function #"..i)
+		-- Try priority names first
+		for _, name in pairs(priorityNames) do
+			local s = workspace:FindFirstChild(name)
+			if s and s:IsA("Script") and not s.Disabled then
+				table.insert(targets, 1, s)
+			end
+		end
+
+		-- Then any other workspace/SSS scripts as fallback
+		for _, child in pairs(game:GetDescendants()) do
+			if child:IsA("Script") and not child.Disabled
+			and not child:IsDescendantOf(game:GetService("Players"))
+			and not table.find(targets, child) then
+				targets[#targets+1] = child
+			end
+		end
+
+		for _, target in pairs(targets) do
+			local targetPath = target:GetFullName()
+			local ok, err = pcall(function()
+				-- Make Source and Disabled writable
+				setscriptable(target, "Source", true)
+				setscriptable(target, "Disabled", true)
+
+				-- Save original source to restore after injection
+				local originalSource = target.Source
+
+				-- Write bridge code
+				target.Source = src
+
+				-- Toggle Disabled to force server re-execution
+				target.Disabled = true
+				task.wait(0.05)
+				target.Disabled = false
+
+				-- Restore original source after a tick so bridge is running
+				task.delay(1, function()
+					pcall(function()
+						setscriptable(target, "Source", true)
+						target.Source = originalSource
+					end)
+					log("Bridge", "Original source restored for " .. targetPath)
+				end)
+			end)
+
+			if ok then
+				log("Bridge", "Method 1 (setscriptable toggle) ✓ via " .. targetPath)
 				injected = true
+				break
 			else
-				warn_tag("Bridge", "Server run #"..i.." failed: "..tostring(err))
+				warn_tag("Bridge", "Method 1 attempt failed on " .. targetPath .. ": " .. tostring(err))
 			end
 		end
 	end
 
-	-- ── Method 4: getsenv — loadstring inside a running server Script's VM ────
+	-- ── Method 2: run_on_server variants (syn/execute_on_server/fluxus etc) ───
+	if not injected then
+		local serverRunFuncs = {
+			rawget(_G, "run_on_server"),
+			rawget(_G, "execute_on_server"),
+			rawget(_G, "RunOnServer"),
+			type(rawget(_G,"syn"))=="table"    and rawget(rawget(_G,"syn"),    "run_on_server") or nil,
+			type(rawget(_G,"solara"))=="table"  and rawget(rawget(_G,"solara"), "run_on_server") or nil,
+			type(rawget(_G,"fluxus"))=="table"  and rawget(rawget(_G,"fluxus"), "run_on_server") or nil,
+			type(rawget(_G,"wave"))=="table"    and rawget(rawget(_G,"wave"),   "run_on_server") or nil,
+			type(rawget(_G,"celery"))=="table"  and rawget(rawget(_G,"celery"), "run_on_server") or nil,
+		}
+		for i, fn in pairs(serverRunFuncs) do
+			if not injected and type(fn) == "function" then
+				local ok2, err = pcall(fn, src)
+				if ok2 then
+					log("Bridge", "Method 2 (run_on_server #"..i..") ✓")
+					injected = true
+				end
+			end
+		end
+	end
+
+	-- ── Method 3: getsenv ─────────────────────────────────────────────────────
 	if not injected then
 		local getsenv = rawget(_G,"getsenv") or rawget(_G,"getscriptenv")
 		if type(getsenv) == "function" then
-			log("Bridge", "getsenv detected — scanning server scripts...")
-			local targets = {}
 			for _, child in pairs(game:GetDescendants()) do
 				if child:IsA("Script") and not child.Disabled
 				and not child:IsDescendantOf(game:GetService("Players")) then
-					targets[#targets+1] = child
-				end
-			end
-			for _, scr in pairs(targets) do
-				local ok2, senv = pcall(getsenv, scr)
-				if ok2 and type(senv) == "table" then
-					local ok3 = pcall(function()
-						local fn = assert(loadstring(src, "DexBridge"))
-						setfenv(fn, setmetatable({}, {__index=senv}))
-						coroutine.wrap(fn)()
-					end)
-					if ok3 then
-						log("Bridge","Method 4 (getsenv) ✓ via "..scr:GetFullName())
-						injected = true
-						break
+					local ok2, senv = pcall(getsenv, child)
+					if ok2 and type(senv) == "table" then
+						local ok3 = pcall(function()
+							local fn = assert(loadstring(src, "DexBridge"))
+							setfenv(fn, setmetatable({}, {__index=senv}))
+							coroutine.wrap(fn)()
+						end)
+						if ok3 then
+							log("Bridge", "Method 3 (getsenv) ✓ via " .. child:GetFullName())
+							injected = true
+							break
+						end
 					end
 				end
 			end
 		end
 	end
 
-	-- ── Method 5: SSS Script Disabled toggle ──────────────────────────────────
-	-- Works on some executors that actually execute server Scripts.
-	-- Does NOT work on Xeno/Fluxus client-only builds.
-	if not injected then
-		local ok2, err = pcall(function()
-			local old2 = sss:FindFirstChild("DexServerBridge")
-			if old2 then pcall(old2.Destroy, old2) task.wait(0.05) end
-			local s = Instance.new("Script")
-			s.Name = "DexServerBridge"
-			s.Disabled = true
-			s.Parent = sss
-			if setscriptable then
-				pcall(setscriptable, s, "Source", true)
-				pcall(setscriptable, s, "Disabled", true)
-			end
-			s.Source = src
-			s.Disabled = false
-		end)
-		if ok2 then
-			log("Bridge", "Method 5 (SSS Script toggle) placed — waiting for pong...")
-			injected = true
-		else
-			warn_tag("Bridge", "Method 5 failed: " .. tostring(err))
-		end
-	end
-
 	if not injected then
 		warn_tag("Bridge", "══════════════════════════════════════════════════")
-		warn_tag("Bridge", "SERVER BRIDGE NOT INJECTED")
-		warn_tag("Bridge", "Edits are LOCAL ONLY — friends won't see changes.")
-		warn_tag("Bridge", "")
-		warn_tag("Bridge", "Requires Synapse X, KRNL, or ScriptWare.")
-		warn_tag("Bridge", "Run this URL server-side in your executor:")
-		warn_tag("Bridge", SERVER_BRIDGE_URL)
+		warn_tag("Bridge", "SERVER BRIDGE NOT INJECTED — edits are local only")
 		warn_tag("Bridge", "══════════════════════════════════════════════════")
 	end
 end
