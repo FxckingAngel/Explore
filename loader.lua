@@ -352,6 +352,21 @@ SVControl.InitAfterMain(appTable)
 
 -- Init window system then each app
 print("[Dex] Building UI...")
+local rs = game:GetService("ReplicatedStorage")
+if not rs:FindFirstChild("DexBridge") then
+	local bridge = Instance.new("RemoteEvent")
+	bridge.Name = "DexBridge"
+	bridge.Parent = rs
+	print("[DexBridge] connected UWU (created)")
+else
+	print("[DexBridge] connected UWU")
+end
+if not rs:FindFirstChild("DexBridgeList") then
+	local listFn = Instance.new("RemoteFunction")
+	listFn.Name = "DexBridgeList"
+	listFn.Parent = rs
+end
+
 if not game:FindFirstChild("ServerScriptService") then
 	local sssMirror = Instance.new("Folder")
 	sssMirror.Name = "ServerScriptService"
@@ -360,20 +375,6 @@ if not game:FindFirstChild("ServerScriptService") then
 	marker.Value = "Client-side mirror for bridge editing"
 	marker.Parent = sssMirror
 
-	local rs = game:GetService("ReplicatedStorage")
-	if not rs:FindFirstChild("DexBridge") then
-		local bridge = Instance.new("RemoteEvent")
-		bridge.Name = "DexBridge"
-		bridge.Parent = rs
-		print("[DexBridge] connected UWU (created)")
-	else
-		print("[DexBridge] connected UWU")
-	end
-	if not rs:FindFirstChild("DexBridgeList") then
-		local listFn = Instance.new("RemoteFunction")
-		listFn.Name = "DexBridgeList"
-		listFn.Parent = rs
-	end
 	local listFn = rs:FindFirstChild("DexBridgeList")
 	if listFn and listFn:IsA("RemoteFunction") then
 		local ok, entries = pcall(function()
