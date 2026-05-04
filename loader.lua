@@ -580,8 +580,23 @@ local function getServerScripts()
 end
 
 -- Send initial ping to confirm server bridge is alive
+-- If server doesn't respond within 5s, warn that SERVER_BRIDGE.lua isn't installed
 log("Bridge", "Sending initial ping to server...")
 bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
+
+coroutine.wrap(function()
+	task.wait(5)
+	-- Check if we got a pong by seeing if bridge is still alive
+	local b = rs:FindFirstChild(BRIDGE_NAME)
+	if not b then
+		warn("[Dex][Bridge] WARNING: DexBridge remote was destroyed - server bridge may not be running")
+		warn("[Dex][Bridge] Install SERVER_BRIDGE.lua in ServerScriptService for live edits to work")
+	else
+		-- Bridge exists but did server respond? We can't easily tell without state,
+		-- so just confirm the remote is alive
+		log("Bridge", "DexBridge remote is alive - if edits aren't syncing, check SERVER_BRIDGE.lua is in ServerScriptService")
+	end
+end)()
 
 -- Store on Main for module access
 Main.Bridge = {

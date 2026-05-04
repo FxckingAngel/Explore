@@ -70,7 +70,6 @@ local function main()
 		elseif vt == "Color3" then
 			return {t="Color3", r=val.R, g=val.G, b=val.B}
 		elseif vt == "CFrame" then
-			local c = val.Components
 			return {t="CFrame", c={val:GetComponents()}}
 		elseif vt == "UDim" then
 			return {t="UDim", s=val.Scale, o=val.Offset}
