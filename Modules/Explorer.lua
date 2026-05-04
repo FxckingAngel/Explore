@@ -1,7 +1,8 @@
 --[[
-	Explorer App Module
+	Explorer App Module v2
 	
 	The main explorer interface
+	Cache-bust: 2026-05-04T03:50:47Z
 ]]
 
 -- Common Locals
