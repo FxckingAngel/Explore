@@ -9,10 +9,18 @@
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoCircle.lua"))()
 ]]
 
+-- ── Kill previous instance ───────────────────────────────────────────────────
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
+
+-- Stop any previously running AutoCircle
+if _G._AutoCircleCleanup then
+	pcall(_G._AutoCircleCleanup)
+	_G._AutoCircleCleanup = nil
+	task.wait(0.1)
+end
 
 local plr = Players.LocalPlayer
 
@@ -553,6 +561,30 @@ end)
 local ok = pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent = ok and game:GetService("CoreGui") or plr.PlayerGui
 
+-- Register cleanup so re-running kills this instance
+_G._AutoCircleCleanup = function()
+	disable()
+	pcall(gui.Destroy, gui)
+	pcall(ringFolder.Destroy, ringFolder)
+end
+
 print("[AutoCircle] Deathball Auto-Hit loaded.")
 print("[AutoCircle] Click ON — blue ring = your zone, yellow ring = ball tracking")
 print("[AutoCircle] Ball enters your ring -> F triggered instantly")
+
+--[[
+DIAGNOSTIC: run this separately to find the hit remote
+paste in executor while playing, then hit the ball manually:
+
+local oldFS = RemoteEvent.FireServer
+hookfunction(oldFS, newcclosure(function(self, ...)
+    local args = {...}
+    local s = ""
+    for i,v in pairs(args) do
+        s = s .. " ["..i.."]=" .. tostring(v):sub(1,30)
+    end
+    print("[HIT REMOTE] " .. self:GetFullName() .. s)
+    return oldFS(self, ...)
+end))
+print("Monitoring... hit the ball manually now")
+]]
