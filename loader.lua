@@ -614,51 +614,36 @@ local function injectServerBridge()
 	local injected = false
 	local sss = game:GetService("ServerScriptService")
 
-	-- ── Method 1: syn.run_on_server (Synapse X — primary target) ─────────────
-	-- This is the only fully reliable method. Synapse X runs the code
-	-- in the actual server VM with full permissions.
-	if not injected then
-		local synT = rawget(_G,"syn")
-		local fn = type(synT)=="table" and rawget(synT,"run_on_server")
-		if type(fn) == "function" then
-			log("Bridge", "Synapse X detected — using syn.run_on_server...")
-			local ok2, err = pcall(fn, src)
-			if ok2 then
-				log("Bridge","Method 1 (syn.run_on_server) ✓")
-				injected = true
-			else
-				warn_tag("Bridge","Method 1 (syn.run_on_server) failed: "..tostring(err))
-			end
-		end
-	end
+	-- ── Attempt every known run_on_server variant ───────────────────────────────
+	-- Covers: Solara, Synapse X compat, KRNL, ScriptWare, Fluxus, Wave, Celery
+	-- Solara maintains Synapse X API compatibility so syn.run_on_server works,
+	-- but also exposes run_on_server globally and via solara namespace.
+	local serverRunFuncs = {
+		-- Global variants (Solara, some others expose globally)
+		rawget(_G, "run_on_server"),
+		rawget(_G, "execute_on_server"),
+		rawget(_G, "RunOnServer"),
+		-- Synapse X / Solara namespace
+		type(rawget(_G,"syn"))=="table"  and rawget(rawget(_G,"syn"),  "run_on_server") or nil,
+		-- Solara namespace
+		type(rawget(_G,"solara"))=="table" and rawget(rawget(_G,"solara"),"run_on_server") or nil,
+		-- Fluxus namespace
+		type(rawget(_G,"fluxus"))=="table" and rawget(rawget(_G,"fluxus"),"run_on_server") or nil,
+		-- Wave namespace
+		type(rawget(_G,"wave"))=="table" and rawget(rawget(_G,"wave"),"run_on_server") or nil,
+		-- Celery namespace
+		type(rawget(_G,"celery"))=="table" and rawget(rawget(_G,"celery"),"run_on_server") or nil,
+	}
 
-	-- ── Method 2: execute_on_server (KRNL, ScriptWare, others) ───────────────
-	if not injected then
-		local fn = rawget(_G,"execute_on_server")
-		if type(fn) == "function" then
-			log("Bridge", "execute_on_server detected...")
+	for i, fn in pairs(serverRunFuncs) do
+		if not injected and type(fn) == "function" then
+			log("Bridge", "Trying server run function #"..i.."...")
 			local ok2, err = pcall(fn, src)
 			if ok2 then
-				log("Bridge","Method 2 (execute_on_server) ✓")
+				log("Bridge", "Server injection ✓ via function #"..i)
 				injected = true
 			else
-				warn_tag("Bridge","Method 2: "..tostring(err))
-			end
-		end
-	end
-
-	-- ── Method 3: fluxus.run_on_server ────────────────────────────────────────
-	if not injected then
-		local fl = rawget(_G,"fluxus")
-		local fn = type(fl)=="table" and rawget(fl,"run_on_server")
-		if type(fn) == "function" then
-			log("Bridge", "Fluxus detected...")
-			local ok2, err = pcall(fn, src)
-			if ok2 then
-				log("Bridge","Method 3 (fluxus.run_on_server) ✓")
-				injected = true
-			else
-				warn_tag("Bridge","Method 3: "..tostring(err))
+				warn_tag("Bridge", "Server run #"..i.." failed: "..tostring(err))
 			end
 		end
 	end
