@@ -45,18 +45,6 @@ local function main()
 	local isa = game.IsA
 	local getAttribute = game.GetAttribute
 	local setAttribute = game.SetAttribute
-	local bridgeRemote
-
-	local function resolveBridge()
-		if bridgeRemote and bridgeRemote.Parent then return bridgeRemote end
-		local rs = game:GetService("ReplicatedStorage")
-		bridgeRemote = rs:FindFirstChild("DexBridge") or rs:FindFirstChild("ScriptBridge")
-		if bridgeRemote then
-			print("[DexBridge] connected UWU")
-		end
-		return bridgeRemote
-	end
-
 	-- Serialize a value to something safe to send over RemoteEvent
 	local function serializeValue(val)
 		if val == nil then return {t="nil"} end
@@ -109,20 +97,31 @@ local function main()
 
 	local function pushBridgePropEdit(obj, propName, finalVal)
 		if not Settings.Properties.LiveEditMode then return end
-		local remote = resolveBridge()
-		if not remote or not remote:IsA("RemoteEvent") then return end
 		local path = ""
 		pcall(function() path = obj:GetFullName() end)
 		local serialized = serializeValue(finalVal)
 		print("[DexBridge] -> PropertyChanged " .. path .. "." .. tostring(propName) .. " = " .. tostring(finalVal))
-		remote:FireServer({
-			Type = "PropertiesLiveEdit",
-			Action = "PropertyChanged:" .. tostring(propName),
+		local payload = {
+			Type       = "PropertiesLiveEdit",
+			Action     = "PropertyChanged:" .. tostring(propName),
 			TargetPath = path,
 			TargetName = obj and obj.Name or "",
-			Value = serialized,
-			Time = os.time(),
-		})
+			Value      = serialized,
+			Time       = os.time(),
+		}
+		-- Prefer loader-managed keepalive remote
+		if Main and Main.Bridge and Main.Bridge.Send then
+			Main.Bridge.Send(payload)
+			return
+		end
+		-- Fallback: direct lookup
+		local rs = game:GetService("ReplicatedStorage")
+		local remote = rs:FindFirstChild("DexBridge")
+		if remote and remote:IsA("RemoteEvent") then
+			pcall(remote.FireServer, remote, payload)
+		else
+			warn("[DexBridge] DexBridge remote not found - is SERVER_BRIDGE.lua running?")
+		end
 	end
 
 	Properties.GuiElems = {}

@@ -34,7 +34,6 @@ end
 
 local function main()
 	local Explorer = {}
-	local bridgeRemote
 	local nodes,tree,listEntries,explorerOrders,searchResults,specResults = {},{},{},{},{},{}
 	local expanded
 	local entryTemplate,treeFrame,toolBar,descendantAddedCon,descendantRemovingCon,itemChangedCon
@@ -52,35 +51,37 @@ local function main()
 	local connectSignal = game.DescendantAdded.Connect
 	local addObject,removeObject,moveObject = nil,nil,nil
 
-	local function resolveBridge()
-		if bridgeRemote and bridgeRemote.Parent then return bridgeRemote end
-		local rs = game:GetService("ReplicatedStorage")
-		bridgeRemote = rs:FindFirstChild("DexBridge") or rs:FindFirstChild("ScriptBridge")
-		if bridgeRemote then
-			print("[DexBridge] connected UWU")
-		end
-		return bridgeRemote
-	end
-
+	-- Sends a live-edit action to the server through DexBridge.
+	-- Uses Main.Bridge.Send (keepalive-managed) when available,
+	-- falls back to a direct ReplicatedStorage lookup.
 	local function pushBridgeAction(action, obj, extra)
 		if not Settings.Explorer.LiveEditMode then return end
-		local remote = resolveBridge()
-		if not remote or not remote:IsA("RemoteEvent") then return end
 		local path = ""
 		pcall(function() path = obj:GetFullName() end)
 		local payload = {
-			Type = "ExplorerLiveEdit",
-			Action = action,
+			Type       = "ExplorerLiveEdit",
+			Action     = action,
 			TargetPath = path,
 			TargetName = obj and obj.Name or "",
-			Time = os.time(),
+			Time       = os.time(),
 		}
-		-- Merge any extra fields (e.g. NewParent, NewName, Value)
 		if type(extra) == "table" then
 			for k,v in pairs(extra) do payload[k] = v end
 		end
-		print("[DexBridge] -> ExplorerLiveEdit action=" .. tostring(action) .. " path=" .. path)
-		remote:FireServer(payload)
+		print("[DexBridge] -> " .. action .. " | " .. path)
+		-- Prefer loader-managed keepalive remote
+		if Main and Main.Bridge and Main.Bridge.Send then
+			Main.Bridge.Send(payload)
+			return
+		end
+		-- Fallback: direct lookup
+		local rs = game:GetService("ReplicatedStorage")
+		local remote = rs:FindFirstChild("DexBridge")
+		if remote and remote:IsA("RemoteEvent") then
+			pcall(remote.FireServer, remote, payload)
+		else
+			warn("[DexBridge] DexBridge remote not found - is SERVER_BRIDGE.lua running?")
+		end
 	end
 
 	addObject = function(root)
@@ -774,16 +775,10 @@ local function main()
 			itemChangedCon = game.ItemChanged:Connect(function(obj,prop)
 				if prop == "Parent" and nodes[obj] then moveObject(obj)
 				elseif prop == "Name" and nodes[obj] then nodes[obj].NameWidth = nil end
-				if nodes[obj] then
-					pushBridgeAction("PropertyChanged:"..tostring(prop), obj)
-				end
 			end)
 		else
 			itemChangedCon = game.ItemChanged:Connect(function(obj,prop)
 				if prop == "Parent" and nodes[obj] then moveObject(obj) end
-				if nodes[obj] then
-					pushBridgeAction("PropertyChanged:"..tostring(prop), obj)
-				end
 			end)
 		end
 	end
