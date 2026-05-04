@@ -3,13 +3,15 @@
 	FxckingAngel/Explore
 	
 	Usage:
-	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/main/loader.lua"))()
+	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/loader.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/main/Modules/"
+local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
 
 local function fetch(module)
-	local ok, src = pcall(game.HttpGet, game, BASE_URL .. module .. ".lua")
+	local ok, src = pcall(function()
+		return game:HttpGet(BASE_URL .. module .. ".lua")
+	end)
 	if not ok or not src or #src == 0 then
 		error(("[Dex] Failed to fetch '"..module.."': "..tostring(src)), 2)
 	end
@@ -67,6 +69,7 @@ applyDefaults({
 		ClickToRename = true,
 		AutoUpdateSearch = true,
 		AutoUpdateMode = 0,
+		LiveEditMode = true,
 		PartSelectionBox = true,
 		GuiSelectionBox = true,
 		CopyPathUseGetChildren = true,
@@ -81,6 +84,7 @@ applyDefaults({
 		LoadstringInput = true,
 		NumberRounding = 3,
 		ShowAttributes = false,
+		LiveEditMode = true,
 		MaxAttributes = 50,
 		ScaleType = 1,
 	},
@@ -153,21 +157,35 @@ local createSimple = function(class, props)
 	return inst
 end
 
--- Build icon maps (mirrors Main.Init)
-local Lib = LibControl.Main()
-
 -- Stub Main table that modules need
 local Main = {
 	Elevated = elevated,
 	GuiHolder = GuiHolder,
 	Mouse = plr:GetMouse(),
 	DisplayOrders = {SideWindow=8, Window=10, Menu=100000, Core=101000},
-	MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16),
-	LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32),
+	MiscIcons = nil,
+	LargeIcons = nil,
 	Apps = {},
 	AppControls = {},
 	MenuApps = {},
 }
+
+-- Wire up deps for all controls
+local env = {}
+local Apps = Main.Apps
+
+local deps = {
+	Main=Main, Lib=nil, Apps=Apps, Settings=Settings,
+	API=nil, RMD=nil, env=env, service=service, plr=plr,
+	create=create, createSimple=createSimple,
+}
+
+-- Lib needs deps before Main() so service/plr/create helpers exist
+LibControl.InitDeps(deps)
+local Lib = LibControl.Main()
+deps.Lib = Lib
+Main.MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16)
+Main.LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32)
 
 Main.MiscIcons:SetDict({
 	Reference=0, Cut=1, Cut_Disabled=2, Copy=3, Copy_Disabled=4, Paste=5, Paste_Disabled=6,
@@ -187,8 +205,43 @@ end
 
 -- Fetch API + RMD (needed by Explorer & Properties)
 print("[Dex] Fetching API...")
-local rawAPI = game:HttpGet("http://setup.roblox.com/"..Version().."-API-Dump.json")
-local apiData = game:GetService("HttpService"):JSONDecode(rawAPI)
+local env = (type(getfenv) == "function" and getfenv()) or _G
+local getVersion = env.Version or env.version or _G.Version or _G.version
+if type(getVersion) ~= "function" then
+	error("[Dex] Could not resolve Roblox version function (Version/version)")
+end
+
+local okVersion, versionId = pcall(getVersion)
+if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
+	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
+end
+
+local apiUrls = {
+	"https://setup.roblox.com/"..versionId.."-API-Dump.json",
+	"https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/API-Dump.json",
+}
+
+local rawAPI, lastApiErr, usedApiUrl
+for i = 1, #apiUrls do
+	local url = apiUrls[i]
+	local okApiFetch, data = pcall(function()
+		return game:HttpGet(url)
+	end)
+	if okApiFetch and type(data) == "string" and #data > 0 then
+		rawAPI = data
+		usedApiUrl = url
+		break
+	end
+	lastApiErr = tostring(data)
+end
+if not rawAPI then
+	error("[Dex] Failed to fetch API dump. Last error: "..tostring(lastApiErr))
+end
+
+local okApiDecode, apiData = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), rawAPI)
+if not okApiDecode or type(apiData) ~= "table" then
+	error("[Dex] Failed to decode API dump JSON from "..tostring(usedApiUrl)..": "..tostring(apiData))
+end
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
 local seenCats = {}
@@ -272,15 +325,8 @@ pcall(function()
 	end
 end)
 
--- Wire up deps for all controls
-local env = {}
-local Apps = Main.Apps
-
-local deps = {
-	Main=Main, Lib=Lib, Apps=Apps, Settings=Settings,
-	API=API, RMD=RMD, env=env, service=service, plr=plr,
-	create=create, createSimple=createSimple,
-}
+deps.API = API
+deps.RMD = RMD
 
 LibControl.InitDeps(deps)
 ExplorerControl.InitDeps(deps)
@@ -306,10 +352,57 @@ SVControl.InitAfterMain(appTable)
 
 -- Init window system then each app
 print("[Dex] Building UI...")
+if not game:FindFirstChild("ServerScriptService") then
+	local sssMirror = Instance.new("Folder")
+	sssMirror.Name = "ServerScriptService"
+	local marker = Instance.new("StringValue")
+	marker.Name = "__BridgeMirror"
+	marker.Value = "Client-side mirror for bridge editing"
+	marker.Parent = sssMirror
+
+	local rs = game:GetService("ReplicatedStorage")
+	if not rs:FindFirstChild("DexBridge") then
+		local bridge = Instance.new("RemoteEvent")
+		bridge.Name = "DexBridge"
+		bridge.Parent = rs
+		print("[DexBridge] connected UWU (created)")
+	else
+		print("[DexBridge] connected UWU")
+	end
+	if not rs:FindFirstChild("DexBridgeList") then
+		local listFn = Instance.new("RemoteFunction")
+		listFn.Name = "DexBridgeList"
+		listFn.Parent = rs
+	end
+	local listFn = rs:FindFirstChild("DexBridgeList")
+	if listFn and listFn:IsA("RemoteFunction") then
+		local ok, entries = pcall(function()
+			return listFn:InvokeServer()
+		end)
+		if ok and type(entries) == "table" then
+			for i = 1, #entries do
+				local entry = entries[i]
+				if type(entry) == "table" and type(entry.Name) == "string" then
+					local node = Instance.new("StringValue")
+					node.Name = entry.Name
+					node.Value = entry.Path or entry.Name
+					node.Parent = sssMirror
+				end
+			end
+		end
+	end
+
+	sssMirror.Parent = game
+end
 Lib.Window.Init()
 Explorer.Init()
 Properties.Init()
-ScriptViewer.Init()
+	local okSV, svErr = pcall(function()
+		ScriptViewer.Init()
+	end)
+	if not okSV then
+		warn("[Dex] ScriptViewer failed to initialize: "..tostring(svErr))
+	end
 
 -- Show Explorer + Properties docked to the right side by default
 Explorer.Window:Show({Align="right", Pos=1, Size=0.5, Silent=true})
