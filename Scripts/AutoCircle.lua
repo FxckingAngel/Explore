@@ -145,41 +145,69 @@ local function update()
 		) * CFrame.Angles(0, -math.atan2(bz-az, bx-ax), 0)
 	end
 
-	-- Scan all objects
-	for _, obj in pairs(workspace:GetDescendants()) do
-		if obj:IsA("BasePart")
-		and not isCharPart(obj)
-		and obj.Parent ~= ringFolder
-		and not obj.Anchored  -- moving objects only
-		then
-			local flatPos = Vector3.new(obj.Position.X, origin.Y, obj.Position.Z)
-			local dist    = (flatPos - origin).Magnitude
-
-			-- Object is crossing through the ring band
-			if dist >= RADIUS - BAND and dist <= RADIUS + BAND then
-				anyHit = true
-				-- Cooldown per object
-				if not triggered[obj] or (now - triggered[obj]) >= COOLDOWN then
-					triggered[obj] = now
-					pressF(obj)
-				end
+	-- Build a set of all player character parts to ignore
+	local playerParts = {}
+	for _, p in pairs(Players:GetPlayers()) do
+		if p.Character then
+			for _, v in pairs(p.Character:GetDescendants()) do
+				playerParts[v] = true
 			end
+			playerParts[p.Character] = true
 		end
 	end
 
-	-- Also trigger on objects INSIDE the ring (they entered and are now inside)
+	-- Names/classes that are clearly floor/terrain/map geometry to skip
+	local function isEnvironment(obj)
+		-- Skip terrain
+		if obj:IsA("Terrain") then return true end
+		-- Skip anything anchored with a flat/large surface (floor-like)
+		if obj.Anchored then
+			local size = obj.Size
+			-- Large flat part = floor/wall/ceiling
+			if (size.X > 20 or size.Z > 20) and size.Y < 5 then return true end
+			if (size.X > 20 or size.Z > 20) and size.X > 20 then return true end
+		end
+		-- Skip by common environment names
+		local name = obj.Name:lower()
+		local envNames = {
+			"floor","ground","wall","ceiling","base","platform","spawn",
+			"map","terrain","baseplate","part","road","path","boundary",
+			"border","barrier","invisible","hitbox","region","zone",
+		}
+		for _, n in pairs(envNames) do
+			if name == n or name:find(n) then return true end
+		end
+		return false
+	end
+
+	local function shouldTrigger(obj)
+		-- Must be a BasePart
+		if not obj:IsA("BasePart") then return false end
+		-- Skip ring parts
+		if obj.Parent == ringFolder then return false end
+		-- Skip our own character
+		if isCharPart(obj) then return false end
+		-- Skip all other players and their characters
+		if playerParts[obj] then return false end
+		-- Skip environment/map geometry
+		if isEnvironment(obj) then return false end
+		-- Must be moving (not anchored) OR be a Tool/model that makes sense to trigger
+		if obj.Anchored and not obj:FindFirstAncestorWhichIsA("Tool") then return false end
+		return true
+	end
+
+	-- Scan for objects crossing the ring band
 	for _, obj in pairs(workspace:GetDescendants()) do
-		if obj:IsA("BasePart")
-		and not isCharPart(obj)
-		and obj.Parent ~= ringFolder
-		then
+		if shouldTrigger(obj) then
 			local flatPos = Vector3.new(obj.Position.X, origin.Y, obj.Position.Z)
 			local dist    = (flatPos - origin).Magnitude
-			-- Object fully inside ring - trigger once
-			if dist < RADIUS - BAND then
-				if not triggered[obj] or (now - triggered[obj]) >= 1 then
+
+			-- Crossing ring band OR fully inside
+			if dist <= RADIUS + BAND then
+				anyHit = true
+				local cooldownTime = dist >= RADIUS - BAND and COOLDOWN or 1
+				if not triggered[obj] or (now - triggered[obj]) >= cooldownTime then
 					triggered[obj] = now
-					anyHit = true
 					pressF(obj)
 				end
 			end
