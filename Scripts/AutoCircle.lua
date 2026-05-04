@@ -24,9 +24,76 @@ local COOLDOWN     = 0.2    -- min seconds between triggers on same ball
 local DEBUG        = true   -- print what gets triggered
 
 -- Colors
-local RING_IDLE    = Color3.fromRGB(0, 180, 255)    -- your ring idle
-local RING_HOT     = Color3.fromRGB(255, 50, 50)    -- your ring when ball inside
-local BALL_RING_C  = Color3.fromRGB(255, 200, 0)    -- ball tracking ring
+local RING_IDLE    = Color3.fromRGB(0, 180, 255)
+local RING_HOT     = Color3.fromRGB(255, 50, 50)
+local BALL_RING_C  = Color3.fromRGB(255, 200, 0)
+
+-- ── Human Logic ───────────────────────────────────────────────────────────────
+-- Deathball context:
+--   - Ball gets FASTER every hit (pressure builds)
+--   - Player moves themselves (no movement injection)
+--   - Reaction must tighten as ball speeds up (or you die)
+--   - Occasional late/miss is human — but less so at high speed (panic mode)
+--   - Fatigue: long rallies make you slightly slower then you recover
+local HUMAN = {
+	-- Reaction time at LOW ball speed (slow ball = relaxed, ~200-350ms)
+	ReactionSlow    = {min=0.18, max=0.34},
+
+	-- Reaction time at HIGH ball speed (fast ball = panic, ~120-200ms)
+	-- Ball speed threshold where panic kicks in (studs/s)
+	PanicSpeed      = 60,
+	ReactionFast    = {min=0.11, max=0.21},
+
+	-- Miss chance at low speed (8%) — drops toward 0 as ball gets fast
+	-- At panic speed: miss chance = 0 (you HAVE to hit it)
+	MissChanceSlow  = 0.08,
+
+	-- Jitter: tiny random noise on each reaction (feels organic)
+	JitterMax       = 0.05,
+
+	-- Fatigue: builds over a long rally, slightly slows reaction
+	FatiguePerHit   = 0.003,   -- adds ~3ms per hit
+	FatigueMax      = 0.06,    -- cap at +60ms
+	FatigueDecay    = 0.002,   -- recovers 2ms per second idle
+
+	-- Post-hit ignore: don't re-trigger immediately after a hit
+	PostHitIgnore   = 0.35,
+}
+
+-- ── Human State ───────────────────────────────────────────────────────────────
+local humanState = {
+	fatigue     = 0,
+	hitCount    = 0,
+	lastHitTime = 0,
+	postIgnore  = 0,
+	pending     = false,
+}
+
+local function rng(min, max)
+	return min + math.random() * (max - min)
+end
+
+local function getReactionTime(ballSpeed)
+	-- Lerp between slow and fast reaction based on ball speed
+	local t = math.clamp((ballSpeed - 20) / (HUMAN.PanicSpeed - 20), 0, 1)
+	local rMin = HUMAN.ReactionSlow.min + (HUMAN.ReactionFast.min - HUMAN.ReactionSlow.min) * t
+	local rMax = HUMAN.ReactionSlow.max + (HUMAN.ReactionFast.max - HUMAN.ReactionSlow.max) * t
+	local reaction = rng(rMin, rMax)
+
+	-- Add jitter (organic micro-variance)
+	reaction = reaction + rng(0, HUMAN.JitterMax)
+
+	-- Add fatigue
+	reaction = reaction + humanState.fatigue
+
+	return reaction
+end
+
+local function getMissChance(ballSpeed)
+	-- Miss chance shrinks as ball gets faster — panic = no misses
+	local t = math.clamp((ballSpeed - 20) / (HUMAN.PanicSpeed - 20), 0, 1)
+	return HUMAN.MissChanceSlow * (1 - t)
+end
 
 -- ── Ball detection ────────────────────────────────────────────────────────────
 -- Deathball game: ball is usually named "Ball", "DeathBall", "Sphere" etc
@@ -143,40 +210,79 @@ local function destroyRing(parts)
 end
 
 -- ── Trigger ───────────────────────────────────────────────────────────────────
+local function doHit(ball)
+	if not ball or not ball.Parent then return end
+	local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	local speed = ball.AssemblyLinearVelocity.Magnitude
+
+	if DEBUG then
+		print(("[AutoCircle] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
+			speed,
+			getReactionTime(speed) * 1000,
+			humanState.fatigue * 1000,
+			humanState.hitCount
+		))
+	end
+
+	-- firetouchinterest — simulate contact
+	pcall(firetouchinterest, root, ball, 0)
+	pcall(firetouchinterest, ball, root, 0)
+	task.wait(rng(0.03, 0.06))
+	pcall(firetouchinterest, root, ball, 1)
+	pcall(firetouchinterest, ball, root, 1)
+
+	-- ClickDetector if present
+	local click = ball:FindFirstChildWhichIsA("ClickDetector", true)
+	if not click then
+		local m = ball:FindFirstAncestorWhichIsA("Model")
+		if m then click = m:FindFirstChildWhichIsA("ClickDetector", true) end
+	end
+	if click then pcall(fireclickdetector, click) end
+
+	-- F key with human hold time
+	pcall(function()
+		game:GetService("VirtualInputManager"):SendKeyEvent(true,  Enum.KeyCode.F, false, game)
+		task.wait(rng(0.05, 0.11))  -- human key hold duration varies
+		game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.F, false, game)
+	end)
+
+	-- Update state
+	humanState.hitCount    = humanState.hitCount + 1
+	humanState.lastHitTime = tick()
+	humanState.postIgnore  = tick() + HUMAN.PostHitIgnore
+	humanState.fatigue     = math.min(humanState.fatigue + HUMAN.FatiguePerHit, HUMAN.FatigueMax)
+end
+
 local function triggerF(ball)
 	local now = tick()
 	if now - lastTrigger < COOLDOWN then return end
+	if humanState.pending then return end
+	if humanState.postIgnore > now then return end
 	lastTrigger = now
 
-	if DEBUG then
-		local vel = ball.AssemblyLinearVelocity.Magnitude
-		print("[AutoCircle] Ball triggered! path=" .. ball:GetFullName()
-			.. " speed=" .. string.format("%.1f", vel) .. " studs/s")
+	local speed = ball.AssemblyLinearVelocity.Magnitude
+
+	-- Miss check — fast ball = almost never miss, slow ball = sometimes miss
+	local missChance = getMissChance(speed)
+	if math.random() < missChance then
+		if DEBUG then
+			print(("[AutoCircle] MISS (%.0f%% chance at speed=%.0f)"):format(missChance*100, speed))
+		end
+		return
 	end
 
-	-- firetouchinterest: simulate ball touching your character
-	local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-	if root then
-		pcall(firetouchinterest, root, ball, 0)
-		pcall(firetouchinterest, ball, root, 0)
-		task.wait(0.05)
-		pcall(firetouchinterest, root, ball, 1)
-		pcall(firetouchinterest, ball, root, 1)
-	end
+	-- Human reaction delay — tightens as ball speeds up
+	local delay = getReactionTime(speed)
+	humanState.pending = true
 
-	-- Also fire click on ball in case game uses ClickDetector
-	local click = ball:FindFirstChildWhichIsA("ClickDetector")
-		or ball:FindFirstAncestorWhichIsA("Model") and
-		   ball:FindFirstAncestorWhichIsA("Model"):FindFirstChildWhichIsA("ClickDetector", true)
-	if click then
-		pcall(fireclickdetector, click)
-	end
-
-	-- VirtualInputManager F key
-	pcall(function()
-		game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.F, false, game)
-		task.wait(0.05)
-		game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.F, false, game)
+	task.delay(delay, function()
+		humanState.pending = false
+		-- Recover fatigue while idle between hits
+		local idleTime = tick() - humanState.lastHitTime
+		humanState.fatigue = math.max(0, humanState.fatigue - HUMAN.FatigueDecay * idleTime)
+		doHit(ball)
 	end)
 end
 
