@@ -1,42 +1,75 @@
 --[[
-	Dex Loader
-	FxckingAngel/Explore
+	Dex Loader — FxckingAngel/Explore
+	
+	Client-side entry point. Loads all modules, builds the full Dex UI,
+	and establishes the client<->server bridge (DexBridge RemoteEvent).
 	
 	Usage:
 	  loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/loader.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
+-- ============================================================
+-- 0. CONSTANTS
+-- ============================================================
+
+local BASE_URL  = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Modules/"
+local BRIDGE_NAME      = "DexBridge"
+local BRIDGE_LIST_NAME = "DexBridgeList"
+local BRIDGE_FN_NAME   = "DexBridgeFn"
+
+-- ============================================================
+-- 1. HELPERS
+-- ============================================================
+
+local function log(tag, msg)
+	print(("[Dex][%s] %s"):format(tag, tostring(msg)))
+end
+
+local function warn_tag(tag, msg)
+	warn(("[Dex][%s] %s"):format(tag, tostring(msg)))
+end
 
 local function fetch(module)
+	log("Loader", "Fetching module: " .. module .. " ...")
 	local ok, src = pcall(function()
 		return game:HttpGet(BASE_URL .. module .. ".lua")
 	end)
 	if not ok or not src or #src == 0 then
-		error(("[Dex] Failed to fetch '"..module.."': "..tostring(src)), 2)
+		error(("[Dex][Loader] HTTP failed for '%s': %s"):format(module, tostring(src)), 2)
 	end
+	log("Loader", module .. " fetched (" .. #src .. " bytes)")
+
 	local fn, err = loadstring(src)
 	if not fn then
-		error(("[Dex] Compile error in '"..module.."': "..tostring(err)), 2)
+		error(("[Dex][Loader] Compile error in '%s': %s"):format(module, tostring(err)), 2)
 	end
+
 	local ok2, result = pcall(fn)
 	if not ok2 then
-		error(("[Dex] Runtime error in '"..module.."': "..tostring(result)), 2)
+		error(("[Dex][Loader] Runtime error in '%s': %s"):format(module, tostring(result)), 2)
 	end
+	log("Loader", module .. " loaded OK")
 	return result
 end
 
-print("[Dex] Fetching modules...")
+-- ============================================================
+-- 2. FETCH MODULE CONTROL TABLES
+-- ============================================================
 
--- Fetch all module control tables
+log("Loader", "=== Starting Dex ===")
+log("Loader", "Fetching Lib...")
 local LibControl        = fetch("Lib")
+log("Loader", "Fetching Explorer...")
 local ExplorerControl   = fetch("Explorer")
+log("Loader", "Fetching Properties...")
 local PropertiesControl = fetch("Properties")
+log("Loader", "Fetching ScriptViewer...")
 local SVControl         = fetch("ScriptViewer")
+log("Loader", "All modules fetched")
 
-print("[Dex] Initializing...")
-
--- Mirrors what Main does in the original Dex source
+-- ============================================================
+-- 3. SERVICES + PLAYER
+-- ============================================================
 
 local service = setmetatable({}, {__index = function(self, name)
 	local s = game:GetService(name)
@@ -47,9 +80,14 @@ end})
 local plr = service.Players.LocalPlayer
 	or service.Players.PlayerAdded:Wait()
 
+log("Loader", "Player: " .. tostring(plr.Name))
+
+-- ============================================================
+-- 4. SETTINGS
+-- ============================================================
+
 local Settings = {}
 
--- Apply default settings (mirrors DefaultSettings in main script)
 local function applyDefaults(defaults, target)
 	for k, v in pairs(defaults) do
 		if type(v) == "table" and v._Recurse then
@@ -135,9 +173,15 @@ applyDefaults({
 	},
 }, Settings)
 
--- Determine gui holder
+log("Loader", "Settings applied")
+
+-- ============================================================
+-- 5. GUI HOLDER + HELPERS
+-- ============================================================
+
 local elevated = pcall(function() game:GetService("CoreGui"):GetFullName() end)
 local GuiHolder = elevated and game:GetService("CoreGui") or plr:FindFirstChildOfClass("PlayerGui")
+log("Loader", "Elevated: " .. tostring(elevated) .. "  GuiHolder: " .. tostring(GuiHolder))
 
 local create = function(data)
 	local insts = {}
@@ -157,7 +201,10 @@ local createSimple = function(class, props)
 	return inst
 end
 
--- Stub Main table that modules need
+-- ============================================================
+-- 6. LIB INIT (must happen before API fetch so ParseXML exists)
+-- ============================================================
+
 local Main = {
 	Elevated = elevated,
 	GuiHolder = GuiHolder,
@@ -170,7 +217,6 @@ local Main = {
 	MenuApps = {},
 }
 
--- Wire up deps for all controls
 local env = {}
 local Apps = Main.Apps
 
@@ -180,13 +226,15 @@ local deps = {
 	create=create, createSimple=createSimple,
 }
 
--- Lib needs deps before Main() so service/plr/create helpers exist
+log("Lib", "Running Lib.Main()...")
 LibControl.InitDeps(deps)
 local Lib = LibControl.Main()
 deps.Lib = Lib
+log("Lib", "Lib ready")
+
+-- Build icon maps
 Main.MiscIcons = Lib.IconMap.new("rbxassetid://6511490623",256,256,16,16)
 Main.LargeIcons = Lib.IconMap.new("rbxassetid://6579106223",256,256,32,32)
-
 Main.MiscIcons:SetDict({
 	Reference=0, Cut=1, Cut_Disabled=2, Copy=3, Copy_Disabled=4, Paste=5, Paste_Disabled=6,
 	Delete=7, Delete_Disabled=8, Group=9, Group_Disabled=10, Ungroup=11, Ungroup_Disabled=12,
@@ -198,50 +246,54 @@ Main.MiscIcons:SetDict({
 	Play=36, Pause=37, Rename_Disabled=38,
 })
 Main.LargeIcons:SetDict({Explorer=0, Properties=1, Script_Viewer=2})
+Main.ShowGui = function(gui) gui.Parent = GuiHolder end
 
-Main.ShowGui = function(gui)
-	gui.Parent = GuiHolder
-end
+log("Loader", "Icon maps ready")
 
--- Fetch API + RMD (needed by Explorer & Properties)
-print("[Dex] Fetching API...")
-local env = (type(getfenv) == "function" and getfenv()) or _G
-local getVersion = env.Version or env.version or _G.Version or _G.version
+-- ============================================================
+-- 7. API DUMP
+-- ============================================================
+
+log("API", "Resolving Roblox version...")
+local rawEnv = (type(getfenv) == "function" and getfenv()) or _G
+local getVersion = rawEnv.Version or rawEnv.version or _G.Version or _G.version
 if type(getVersion) ~= "function" then
-	error("[Dex] Could not resolve Roblox version function (Version/version)")
+	error("[Dex][API] Could not find Version() function in executor env")
 end
-
-local okVersion, versionId = pcall(getVersion)
-if not okVersion or type(versionId) ~= "string" or #versionId == 0 then
-	error("[Dex] Failed to read Roblox version id: "..tostring(versionId))
+local okVer, versionId = pcall(getVersion)
+if not okVer or type(versionId) ~= "string" or #versionId == 0 then
+	error("[Dex][API] Version() failed: " .. tostring(versionId))
 end
+log("API", "Roblox version: " .. versionId)
 
 local apiUrls = {
 	"https://setup.roblox.com/"..versionId.."-API-Dump.json",
 	"https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/API-Dump.json",
 }
 
-local rawAPI, lastApiErr, usedApiUrl
-for i = 1, #apiUrls do
-	local url = apiUrls[i]
-	local okApiFetch, data = pcall(function()
-		return game:HttpGet(url)
-	end)
-	if okApiFetch and type(data) == "string" and #data > 0 then
+local rawAPI, usedApiUrl
+for i, url in ipairs(apiUrls) do
+	log("API", "Trying URL " .. i .. ": " .. url)
+	local ok, data = pcall(game.HttpGet, game, url)
+	if ok and type(data) == "string" and #data > 100 then
 		rawAPI = data
 		usedApiUrl = url
+		log("API", "Fetched from URL " .. i .. " (" .. #data .. " bytes)")
 		break
+	else
+		warn_tag("API", "URL " .. i .. " failed: " .. tostring(data))
 	end
-	lastApiErr = tostring(data)
 end
 if not rawAPI then
-	error("[Dex] Failed to fetch API dump. Last error: "..tostring(lastApiErr))
+	error("[Dex][API] All API dump URLs failed")
 end
 
-local okApiDecode, apiData = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), rawAPI)
-if not okApiDecode or type(apiData) ~= "table" then
-	error("[Dex] Failed to decode API dump JSON from "..tostring(usedApiUrl)..": "..tostring(apiData))
+log("API", "Decoding JSON...")
+local okDec, apiData = pcall(service.HttpService.JSONDecode, service.HttpService, rawAPI)
+if not okDec then
+	error("[Dex][API] JSON decode failed: " .. tostring(apiData))
 end
+log("API", "JSON decoded. Classes: " .. tostring(#(apiData.Classes or {})))
 
 local API = {Classes={}, Enums={}, CategoryOrder={}, GetMember=function() return {} end}
 local seenCats = {}
@@ -278,14 +330,20 @@ for _, enum in pairs(apiData.Enums) do
 	for _,item in pairs(enum.Items) do table.insert(ne.Items,{Name=item.Name,Value=item.Value}) end
 	API.Enums[enum.Name] = ne
 end
+log("API", "API built OK")
 
--- Minimal RMD
+-- ============================================================
+-- 8. RMD
+-- ============================================================
+
 local RMD = {Classes={}, Enums={}, PropertyOrders={}}
-pcall(function()
-	print("[Dex] Fetching RMD...")
+log("RMD", "Fetching ReflectionMetadata...")
+local okRMD, rmdErr = pcall(function()
 	local rawXML = game:HttpGet("https://raw.githubusercontent.com/CloneTrooper1019/Roblox-Client-Tracker/roblox/ReflectionMetadata.xml")
+	log("RMD", "Fetched (" .. #rawXML .. " bytes), parsing...")
 	local parsed = Lib.ParseXML(rawXML)
 	local classList = parsed.children[1].children[1].children
+	local classCount = 0
 	for _, class in pairs(classList) do
 		local className = ""
 		for _, child in pairs(class.children) do
@@ -298,6 +356,7 @@ pcall(function()
 				end
 				className = data.Name
 				RMD.Classes[className] = data
+				classCount = classCount + 1
 			elseif child.attrs and child.attrs.class == "ReflectionMetadataProperties" then
 				for _, member in pairs(child.children) do
 					if member.attrs and member.attrs.class == "ReflectionMetadataMember" then
@@ -323,95 +382,220 @@ pcall(function()
 			end
 		end
 	end
+	log("RMD", "Parsed " .. classCount .. " classes")
 end)
+if not okRMD then
+	warn_tag("RMD", "Failed (non-fatal): " .. tostring(rmdErr))
+else
+	log("RMD", "Ready")
+end
+
+-- ============================================================
+-- 9. CLIENT <-> SERVER BRIDGE
+-- ============================================================
+
+local rs = service.ReplicatedStorage
+log("Bridge", "Setting up client<->server bridge...")
+
+-- RemoteEvent: fire-and-forget messages to/from server
+local bridge = rs:FindFirstChild(BRIDGE_NAME)
+if bridge then
+	log("Bridge", "RemoteEvent '" .. BRIDGE_NAME .. "' already exists")
+else
+	-- Client can't create RemoteEvents on server — wait briefly for server script to create it
+	log("Bridge", "Waiting for server to create '" .. BRIDGE_NAME .. "' (up to 5s)...")
+	local waited = 0
+	while not bridge and waited < 5 do
+		bridge = rs:FindFirstChild(BRIDGE_NAME)
+		if not bridge then
+			task.wait(0.5)
+			waited = waited + 0.5
+		end
+	end
+	if bridge then
+		log("Bridge", "Server created '" .. BRIDGE_NAME .. "' after " .. waited .. "s ✓")
+	else
+		warn_tag("Bridge", "'" .. BRIDGE_NAME .. "' not found after 5s — server bridge script may not be running. Some features disabled.")
+	end
+end
+
+-- RemoteFunction: request/response (e.g. listing server scripts)
+local bridgeListFn = rs:FindFirstChild(BRIDGE_LIST_NAME)
+if bridgeListFn then
+	log("Bridge", "RemoteFunction '" .. BRIDGE_LIST_NAME .. "' found ✓")
+else
+	warn_tag("Bridge", "'" .. BRIDGE_LIST_NAME .. "' not found — server-side script listing disabled")
+end
+
+-- RemoteFunction: generic invoke (property set, script source push etc)
+local bridgeFn = rs:FindFirstChild(BRIDGE_FN_NAME)
+if bridgeFn then
+	log("Bridge", "RemoteFunction '" .. BRIDGE_FN_NAME .. "' found ✓")
+else
+	warn_tag("Bridge", "'" .. BRIDGE_FN_NAME .. "' not found — server invoke disabled")
+end
+
+-- Listen for server → client messages
+if bridge and bridge:IsA("RemoteEvent") then
+	bridge.OnClientEvent:Connect(function(payload)
+		if type(payload) ~= "table" then
+			warn_tag("Bridge", "Received non-table payload from server: " .. type(payload))
+			return
+		end
+		log("Bridge", "← Server event received: type=" .. tostring(payload.Type))
+
+		if payload.Type == "ServerLog" then
+			-- Server pushed a log message to show in console
+			print(("[DexBridge][Server] %s"):format(tostring(payload.Message)))
+
+		elseif payload.Type == "ScriptSourcePush" then
+			-- Server pushed updated source for a script (e.g. after another admin edited it)
+			log("Bridge", "Script source push from server: " .. tostring(payload.Path))
+			-- ScriptViewer can pick this up if open
+
+		elseif payload.Type == "Ping" then
+			log("Bridge", "← Ping from server, sending pong...")
+			bridge:FireServer({Type="Pong", Time=tick()})
+		else
+			log("Bridge", "Unknown server payload type: " .. tostring(payload.Type))
+		end
+	end)
+	log("Bridge", "OnClientEvent listener registered ✓")
+end
+
+-- Helper: send payload to server
+local function bridgeSend(payload)
+	if not bridge or not bridge:IsA("RemoteEvent") then
+		warn_tag("Bridge", "bridgeSend called but bridge not available")
+		return false
+	end
+	log("Bridge", "→ Sending to server: type=" .. tostring(payload.Type))
+	local ok, err = pcall(bridge.FireServer, bridge, payload)
+	if not ok then
+		warn_tag("Bridge", "FireServer failed: " .. tostring(err))
+		return false
+	end
+	return true
+end
+
+-- Helper: invoke server and get response
+local function bridgeInvoke(payload)
+	if not bridgeFn or not bridgeFn:IsA("RemoteFunction") then
+		warn_tag("Bridge", "bridgeInvoke called but '" .. BRIDGE_FN_NAME .. "' not available")
+		return nil
+	end
+	log("Bridge", "→ Invoking server: type=" .. tostring(payload.Type))
+	local ok, result = pcall(bridgeFn.InvokeServer, bridgeFn, payload)
+	if not ok then
+		warn_tag("Bridge", "InvokeServer failed: " .. tostring(result))
+		return nil
+	end
+	log("Bridge", "← Server invoke response received")
+	return result
+end
+
+-- Helper: get server script list
+local function getServerScripts()
+	if not bridgeListFn or not bridgeListFn:IsA("RemoteFunction") then
+		warn_tag("Bridge", "getServerScripts: '" .. BRIDGE_LIST_NAME .. "' not available")
+		return {}
+	end
+	log("Bridge", "→ Requesting server script list...")
+	local ok, result = pcall(bridgeListFn.InvokeServer, bridgeListFn)
+	if not ok then
+		warn_tag("Bridge", "getServerScripts failed: " .. tostring(result))
+		return {}
+	end
+	local count = type(result) == "table" and #result or 0
+	log("Bridge", "← Server returned " .. count .. " scripts")
+	return result or {}
+end
+
+-- Send initial ping to confirm bridge is alive
+if bridge and bridge:IsA("RemoteEvent") then
+	log("Bridge", "→ Sending initial ping to server...")
+	bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
+end
+
+-- Store bridge helpers on Main so modules can access them
+Main.Bridge = {
+	Send = bridgeSend,
+	Invoke = bridgeInvoke,
+	GetServerScripts = getServerScripts,
+	Event = bridge,
+	ListFn = bridgeListFn,
+	Fn = bridgeFn,
+}
+log("Bridge", "Bridge setup complete")
+
+-- ============================================================
+-- 10. INIT ALL MODULES WITH FULL DEPS
+-- ============================================================
 
 deps.API = API
 deps.RMD = RMD
 
+log("Loader", "Running InitDeps for all modules...")
 LibControl.InitDeps(deps)
 ExplorerControl.InitDeps(deps)
 PropertiesControl.InitDeps(deps)
 SVControl.InitDeps(deps)
+log("Loader", "InitDeps done")
 
--- Run each module's Main() to get the app table
-local Explorer    = ExplorerControl.Main()
-local Properties  = PropertiesControl.Main()
+log("Loader", "Running Main() for Explorer, Properties, ScriptViewer...")
+local Explorer     = ExplorerControl.Main()
+local Properties   = PropertiesControl.Main()
 local ScriptViewer = SVControl.Main()
 
-Apps.Explorer    = Explorer
-Apps.Properties  = Properties
+Apps.Explorer     = Explorer
+Apps.Properties   = Properties
 Apps.ScriptViewer = ScriptViewer
 
 local appTable = {Explorer=Explorer, Properties=Properties, ScriptViewer=ScriptViewer}
 
--- InitAfterMain so modules can cross-reference each other
+log("Loader", "Running InitAfterMain for all modules...")
 LibControl.InitAfterMain(appTable)
 ExplorerControl.InitAfterMain(appTable)
 PropertiesControl.InitAfterMain(appTable)
 SVControl.InitAfterMain(appTable)
+log("Loader", "InitAfterMain done")
 
--- Init window system then each app
-print("[Dex] Building UI...")
-local rs = game:GetService("ReplicatedStorage")
-if not rs:FindFirstChild("DexBridge") then
-	local bridge = Instance.new("RemoteEvent")
-	bridge.Name = "DexBridge"
-	bridge.Parent = rs
-	print("[DexBridge] connected UWU (created)")
-else
-	print("[DexBridge] connected UWU")
-end
-if not rs:FindFirstChild("DexBridgeList") then
-	local listFn = Instance.new("RemoteFunction")
-	listFn.Name = "DexBridgeList"
-	listFn.Parent = rs
-end
+-- ============================================================
+-- 11. BUILD UI
+-- ============================================================
 
-if not game:FindFirstChild("ServerScriptService") then
-	local sssMirror = Instance.new("Folder")
-	sssMirror.Name = "ServerScriptService"
-	local marker = Instance.new("StringValue")
-	marker.Name = "__BridgeMirror"
-	marker.Value = "Client-side mirror for bridge editing"
-	marker.Parent = sssMirror
-
-	local listFn = rs:FindFirstChild("DexBridgeList")
-	if listFn and listFn:IsA("RemoteFunction") then
-		local ok, entries = pcall(function()
-			return listFn:InvokeServer()
-		end)
-		if ok and type(entries) == "table" then
-			for i = 1, #entries do
-				local entry = entries[i]
-				if type(entry) == "table" and type(entry.Name) == "string" then
-					local node = Instance.new("StringValue")
-					node.Name = entry.Name
-					node.Value = entry.Path or entry.Name
-					node.Parent = sssMirror
-				end
-			end
-		end
-	end
-
-	sssMirror.Parent = game
-end
+log("UI", "Initializing window system...")
 Lib.Window.Init()
-Explorer.Init()
-Properties.Init()
-	local okSV, svErr = pcall(function()
-		ScriptViewer.Init()
-	end)
-	if not okSV then
-		warn("[Dex] ScriptViewer failed to initialize: "..tostring(svErr))
-	end
+log("UI", "Window system ready")
 
--- Show Explorer + Properties docked to the right side by default
+log("UI", "Initializing Explorer...")
+Explorer.Init()
+log("UI", "Explorer ready")
+
+log("UI", "Initializing Properties...")
+Properties.Init()
+log("UI", "Properties ready")
+
+log("UI", "Initializing ScriptViewer...")
+local okSV, svErr = pcall(ScriptViewer.Init)
+if not okSV then
+	warn_tag("UI", "ScriptViewer.Init failed (non-fatal): " .. tostring(svErr))
+else
+	log("UI", "ScriptViewer ready")
+end
+
+-- Show Explorer + Properties docked right by default
+log("UI", "Showing windows...")
 Explorer.Window:Show({Align="right", Pos=1, Size=0.5, Silent=true})
 Properties.Window:Show({Align="right", Pos=2, Size=0.5, Silent=true})
 
--- Slight defer so side-panel tween plays correctly
 task.defer(function()
 	Lib.Window.ToggleSide("right")
 end)
 
-print("[Dex] Ready.")
+-- ============================================================
+-- 12. DONE
+-- ============================================================
+
+log("Loader", "=== Dex Ready === Player: " .. plr.Name)
+log("Bridge", "Bridge status: Event=" .. tostring(bridge ~= nil) .. "  ListFn=" .. tostring(bridgeListFn ~= nil) .. "  Fn=" .. tostring(bridgeFn ~= nil))
