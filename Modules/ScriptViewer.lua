@@ -35,6 +35,9 @@ end
 local function main()
 	local ScriptViewer = {}
 	local window, codeFrame
+	local bridgeRemote
+	local liveEditEnabled = false
+	local currentScript
 
 	-- ============================================================
 	-- Constants
@@ -69,6 +72,15 @@ local function main()
 		if #result == 0 then
 			return nil, ("'%s' returned empty string"):format(name)
 		end
+		local lowered = string.lower(result)
+		if lowered:find("<!doctype html", 1, true)
+			or lowered:find("<html", 1, true)
+			or lowered:find("cloudfront", 1, true)
+			or lowered:find("request could not be satisfied", 1, true)
+			or lowered:find("konstant api", 1, true)
+		then
+			return nil, ("'%s' returned remote HTML/error payload"):format(name)
+		end
 		return result, nil
 	end
 
@@ -102,10 +114,13 @@ local function main()
 	local function buildStrategies()
 		return {
 			{
-				name = "decompile()",
+				name = "decompiler.decompile()",
 				fn = function(s)
-					assert(type(decompile) == "function", "not available")
-					return decompile(s)
+					assert(
+						type(decompiler) == "table" and type(decompiler.decompile) == "function",
+						"not available"
+					)
+					return decompiler.decompile(s)
 				end,
 			},
 			{
@@ -116,13 +131,30 @@ local function main()
 				end,
 			},
 			{
-				name = "decompiler.decompile()",
+				name = "getrenv().decompile()",
 				fn = function(s)
-					assert(
-						type(decompiler) == "table" and type(decompiler.decompile) == "function",
-						"not available"
-					)
-					return decompiler.decompile(s)
+					assert(type(getrenv) == "function", "not available")
+					local renv = getrenv()
+					assert(type(renv) == "table" and type(renv.decompile) == "function", "not available")
+					return renv.decompile(s)
+				end,
+			},
+			{
+				name = "decompile()",
+				fn = function(s)
+					assert(type(decompile) == "function", "not available")
+					return decompile(s)
+				end,
+			},
+			{
+				name = "getscriptclosure() + decompile()",
+				fn = function(s)
+					assert(type(getscriptclosure) == "function", "not available")
+					local cl = getscriptclosure(s)
+					assert(type(cl) == "function", "no closure")
+					local dec = decompile or (_G and _G.decompile)
+					assert(type(dec) == "function", "decompile not available")
+					return dec(cl)
 				end,
 			},
 			{
@@ -187,12 +219,44 @@ local function main()
 		return table.concat(lines, "\n")
 	end
 
+	local function resolveBridge()
+		if bridgeRemote and bridgeRemote.Parent then return bridgeRemote end
+		local rs = game:GetService("ReplicatedStorage")
+		bridgeRemote = rs:FindFirstChild("DexBridge")
+			or rs:FindFirstChild("LocalGUIEnabler")
+			or rs:FindFirstChild("ScriptBridge")
+		return bridgeRemote
+	end
+
+	local function pushToBridge(source)
+		local remote = resolveBridge()
+		if not remote or not remote:IsA("RemoteEvent") then
+			return false
+		end
+		local targetPath = ""
+		if currentScript then
+			pcall(function()
+				targetPath = currentScript:GetFullName()
+			end)
+		end
+		remote:FireServer({
+			Type = "ScriptViewerSync",
+			Source = source,
+			TargetPath = targetPath,
+			TargetName = currentScript and currentScript.Name or "",
+			PlaceId = game.PlaceId,
+			Time = os.time(),
+		})
+		return true
+	end
+
 	-- ============================================================
 	-- ScriptViewer API
 	-- ============================================================
 
 	ScriptViewer.ViewScript = function(scr)
 		if not scr then return end
+		currentScript = scr
 
 		-- Validate it's actually a scriptable source container
 		local ok, isScript = pcall(function()
@@ -229,10 +293,34 @@ local function main()
 		window:Resize(500, 400)
 		ScriptViewer.Window = window
 
-		codeFrame = Lib.CodeFrame.new()
-		codeFrame.Frame.Position = UDim2.new(0, 0, 0, 20)
-		codeFrame.Frame.Size = UDim2.new(1, 0, 1, -20)
-		codeFrame.Frame.Parent = window.GuiElems.Content
+		if Lib.CodeFrame and Lib.CodeFrame.new then
+			codeFrame = Lib.CodeFrame.new()
+			codeFrame.Frame.Position = UDim2.new(0, 0, 0, 20)
+			codeFrame.Frame.Size = UDim2.new(1, 0, 1, -20)
+			codeFrame.Frame.Parent = window.GuiElems.Content
+		else
+			local fallback = Instance.new("TextBox")
+			fallback.Name = "CodeFrameFallback"
+			fallback.MultiLine = true
+			fallback.ClearTextOnFocus = false
+			fallback.TextXAlignment = Enum.TextXAlignment.Left
+			fallback.TextYAlignment = Enum.TextYAlignment.Top
+			fallback.Font = Enum.Font.Code
+			fallback.TextSize = 14
+			fallback.TextWrapped = false
+			fallback.Text = ""
+			fallback.TextColor3 = Color3.new(1,1,1)
+			fallback.BackgroundColor3 = Color3.fromRGB(36,36,36)
+			fallback.BorderSizePixel = 0
+			fallback.Position = UDim2.new(0, 0, 0, 20)
+			fallback.Size = UDim2.new(1, 0, 1, -20)
+			fallback.Parent = window.GuiElems.Content
+			codeFrame = {
+				Frame = fallback,
+				SetText = function(_,txt) fallback.Text = txt or "" end,
+				GetText = function() return fallback.Text end,
+			}
+		end
 
 		-- Copy to Clipboard button
 		local copy = Instance.new("TextButton", window.GuiElems.Content)
@@ -253,7 +341,7 @@ local function main()
 		save.Size = UDim2.new(0.5, 0, 0, 20)
 		save.Text = "Save to File"
 		save.TextColor3 = Color3.new(1, 1, 1)
-		save.MouseButton1Click:Connect(function()
+			save.MouseButton1Click:Connect(function()
 			if not env.writefile then return end
 			local source = codeFrame:GetText()
 			local filename = ("Place_%s_Script_%s.lua"):format(tostring(game.PlaceId), tostring(os.time()))
@@ -261,8 +349,56 @@ local function main()
 			if movefileas then
 				movefileas(filename, ".lua")
 			end
+			end)
+
+		-- Edit toggle
+		local editable = Instance.new("TextButton", window.GuiElems.Content)
+		editable.BackgroundTransparency = 1
+		editable.Position = UDim2.new(0, 0, 0, 20)
+		editable.Size = UDim2.new(0.5, 0, 0, 20)
+		editable.Text = "Editor: OFF"
+		editable.TextColor3 = Color3.new(1, 1, 1)
+		editable.MouseButton1Click:Connect(function()
+			local box = codeFrame.Frame
+			if box and box:IsA("TextBox") then
+				box.TextEditable = not box.TextEditable
+				editable.Text = box.TextEditable and "Editor: ON" or "Editor: OFF"
+				liveEditEnabled = box.TextEditable
+			end
 		end)
-	end
+
+		-- Server bridge push
+		local push = Instance.new("TextButton", window.GuiElems.Content)
+		push.BackgroundTransparency = 1
+		push.Position = UDim2.new(0.5, 0, 0, 20)
+		push.Size = UDim2.new(0.5, 0, 0, 20)
+		push.Text = "Send to Server"
+		push.TextColor3 = Color3.new(1, 1, 1)
+		push.MouseButton1Click:Connect(function()
+			if not pushToBridge(codeFrame:GetText()) then
+				push.Text = "Bridge Missing"
+				return
+			end
+			push.Text = "Sent"
+			task.delay(1.2, function()
+				if push.Parent then push.Text = "Send to Server" end
+			end)
+		end)
+
+		local box = codeFrame.Frame
+		if box and box:IsA("TextBox") then
+			local liveNonce = 0
+			box:GetPropertyChangedSignal("Text"):Connect(function()
+				if not liveEditEnabled then return end
+				liveNonce = liveNonce + 1
+				local myNonce = liveNonce
+				task.delay(0.35, function()
+					if myNonce ~= liveNonce or not liveEditEnabled then return end
+					pushToBridge(box.Text)
+				end)
+			end)
+		end
+		end
 
 	return ScriptViewer
 end
