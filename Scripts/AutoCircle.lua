@@ -17,9 +17,9 @@ local TweenService     = game:GetService("TweenService")
 local plr = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local RADIUS       = 10     -- your detection ring radius (studs)
+local RADIUS       = 20     -- your detection ring radius (studs)
 local SEGMENTS     = 64     -- ring smoothness
-local BAND         = 6      -- extra tolerance (radius ± studs)
+local BAND         = 8      -- extra tolerance (radius ± studs)
 local COOLDOWN     = 0.2    -- min seconds between triggers on same ball
 local DEBUG        = true   -- print what gets triggered
 
@@ -36,12 +36,12 @@ local BALL_RING_C  = Color3.fromRGB(255, 200, 0)
 --   - Occasional late/miss is human — but less so at high speed (panic mode)
 --   - Fatigue: long rallies make you slightly slower then you recover
 local HUMAN = {
-	-- Reaction time at LOW ball speed (~150-250ms — deathball is always fast)
-	ReactionSlow    = {min=0.12, max=0.22},
+	-- Reaction time at LOW ball speed
+	ReactionSlow    = {min=0.08, max=0.15},
 
-	-- Reaction time at HIGH ball speed (panic ~80-150ms)
+	-- Reaction time at HIGH ball speed (panic)
 	PanicSpeed      = 80,
-	ReactionFast    = {min=0.07, max=0.14},
+	ReactionFast    = {min=0.05, max=0.10},
 
 	-- Miss chance at low speed (8%) — drops toward 0 as ball gets fast
 	-- At panic speed: miss chance = 0 (you HAVE to hit it)
@@ -349,9 +349,10 @@ local function triggerF(ball)
 		local predictedPos = entryPos + entryVel * delay
 		local predictedDist = (predictedPos - root.Position).Magnitude
 
-		-- Hit if ball is nearby OR was passing through (predicted path came close)
-		local inRange = currentDist <= RADIUS + BAND + speed * delay * 0.5
-		local wasNear = predictedDist <= RADIUS + BAND * 2
+		-- Be generous — if ball was heading toward us or passed through, hit anyway
+		-- A real player commits to the swing once they start it
+		local inRange = currentDist <= RADIUS + BAND + speed * delay
+		local wasNear = predictedDist <= RADIUS + BAND * 3
 
 		if not inRange and not wasNear then
 			if DEBUG then
