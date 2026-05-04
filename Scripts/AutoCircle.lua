@@ -141,37 +141,27 @@ end
 -- We detect it by: name="Sword", parent.Name="SwordWelds", velocity > 80 studs/s
 -- 80 studs/s threshold: fast enough to be a thrown/hit ball, not someone walking
 
--- The ball in this Deathball game is:
---   Workspace.FX.RockTemplate
---   size ~0.648 x 0.648 x 0.648 (roughly cubic)
---   parent = Workspace.FX
---   no mesh, Block shape, moves at 40+ studs/s during play
+-- CONFIRMED: ball = Workspace.FX.RockTemplate
+-- Evidence from live velocity spike tracking:
+--   hit 1: vel=42.4  spike=+42.4
+--   hit 2: vel=71.9  spike=+36.6  (faster each hit)
+--   hit 3: vel=122.5 spike=+57.6  (keeps accelerating)
+-- All other objects spike at fixed intervals (40, 80) = UI sync, not physics
+-- RockTemplate is the ONLY object with irregular spikes + increasing velocity
 
-local BALL_MIN_VELOCITY = 15  -- studs/s minimum to count as in-play
+-- Velocity threshold: ball starts at ~40 studs/s, ignore when stationary (~0)
+local BALL_MIN_VELOCITY = 20
 
 local function looksLikeBall(obj)
 	if not obj:IsA("BasePart") then return false end
 	if obj.Anchored then return false end
 
-	-- Skip player parts
-	for _, p in pairs(Players:GetPlayers()) do
-		local c = p.Character
-		if c and obj:IsDescendantOf(c) then return false end
-	end
-
-	-- Primary match: RockTemplate in FX
-	if obj.Name == "RockTemplate" and obj.Parent and obj.Parent.Name == "FX" then
-		return obj.AssemblyLinearVelocity.Magnitude >= BALL_MIN_VELOCITY
-	end
-
-	-- Fallback: any small roughly-cubic fast-moving object in FX folder
-	if obj.Parent and obj.Parent.Name == "FX" then
-		local s = obj.Size
-		local ratio = math.max(s.X,s.Y,s.Z) / math.max(0.01, math.min(s.X,s.Y,s.Z))
-		local vel = obj.AssemblyLinearVelocity.Magnitude
-		if ratio < 1.5 and vel >= BALL_MIN_VELOCITY and s.Magnitude < 3 then
-			return true
-		end
+	-- Exact match: RockTemplate in FX
+	if obj.Name == "RockTemplate"
+	and obj.Parent
+	and obj.Parent.Name == "FX"
+	and obj.AssemblyLinearVelocity.Magnitude >= BALL_MIN_VELOCITY then
+		return true
 	end
 
 	return false
