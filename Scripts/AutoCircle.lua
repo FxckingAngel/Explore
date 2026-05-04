@@ -124,61 +124,81 @@ local function isPlayerPart(obj)
 	return false
 end
 
+-- The actual ball in this Deathball game:
+--   mesh = FileMesh (custom ball mesh)
+--   shape = Block (Roblox default)
+--   parent = SwordWelds (game groups it with sword data)
+--   name = "Sword" (confusingly named, but it IS the ball)
+--   velocity = very high (174 studs/s seen)
+--   size = ~0.83 x 4.37 x 0.26 (custom mesh, underlying part is small)
+--
+-- Strategy: detect by FileMesh + high velocity + NOT a player part
+-- We lock onto the FASTEST non-player moving object as the ball
+
 local function looksLikeBall(obj)
 	if not obj:IsA("BasePart") then return false end
 	if obj.Anchored then return false end
 	if isPlayerPart(obj) then return false end
-	if isExcluded(obj.Name) then return false end
 
-	-- Must be a sphere shape OR special sphere mesh
-	local isSphere = false
-
-	if obj:IsA("Part") and obj.Shape == Enum.PartType.Ball then
-		isSphere = true
-	end
-
+	-- Must have a FileMesh or be a sphere shape
 	local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
-	if mesh and mesh.MeshType == Enum.MeshType.Sphere then
-		isSphere = true
+	local hasMesh = mesh ~= nil
+	local isSphere = (obj:IsA("Part") and obj.Shape == Enum.PartType.Ball)
+		or (mesh and mesh.MeshType == Enum.MeshType.Sphere)
+	local isFileMesh = mesh and mesh.MeshType == Enum.MeshType.FileMesh
+
+	if not hasMesh and not isSphere then return false end
+
+	-- Must be moving fast (ball is always in motion when in play)
+	local vel = obj.AssemblyLinearVelocity.Magnitude
+	if vel < 10 then return false end
+
+	-- Must NOT be a player body part (sword welds are on players too)
+	-- Check: if the top-level ancestor under workspace is a player character, skip
+	local topLevel = obj
+	while topLevel.Parent and topLevel.Parent ~= workspace do
+		topLevel = topLevel.Parent
 	end
-
-	if not isSphere then return false end
-
-	-- Must be roughly equal XYZ (a real ball, not a flat disc)
-	local s = obj.Size
-	local ratio = math.max(s.X, s.Y, s.Z) / math.max(0.01, math.min(s.X, s.Y, s.Z))
-	if ratio > 2 then return false end  -- too elongated
-
-	-- Must be at least 1 stud (not a tiny hitbox)
-	if s.Magnitude < 1 then return false end
+	for _, p in pairs(Players:GetPlayers()) do
+		if p.Character and topLevel == p.Character then return false end
+	end
 
 	return true
 end
 
--- Find the ball — locks onto ONE object and tracks it
-local lockedBall = nil
-
+-- Find the FASTEST moving non-player meshed object = the ball
 local function findBall()
-	-- If we already have a locked ball and it's still valid, keep it
 	if lockedBall and lockedBall.Parent and looksLikeBall(lockedBall) then
 		return lockedBall
 	end
 
-	-- Search for new ball
 	lockedBall = nil
+	local bestVel = 0
+	local bestObj = nil
+
 	for _, obj in pairs(workspace:GetDescendants()) do
 		if looksLikeBall(obj) then
-			lockedBall = obj
-			if DEBUG then
-				print("[AutoCircle] Locked onto ball: " .. obj:GetFullName()
-					.. " shape=" .. tostring(obj:IsA("Part") and obj.Shape)
-					.. " size=" .. tostring(obj.Size))
+			local vel = obj.AssemblyLinearVelocity.Magnitude
+			if vel > bestVel then
+				bestVel = vel
+				bestObj = obj
 			end
-			return obj
 		end
 	end
-	return nil
+
+	if bestObj then
+		lockedBall = bestObj
+		if DEBUG then
+			print("[AutoCircle] Locked ball: " .. bestObj:GetFullName()
+				.. " vel=" .. string.format("%.1f", bestVel)
+				.. " size=" .. tostring(bestObj.Size))
+		end
+	end
+	return lockedBall
 end
+
+-- lockedBall declared before looksLikeBall (used inside it)
+local lockedBall = nil
 
 -- ── State ─────────────────────────────────────────────────────────────────────
 local active      = false
