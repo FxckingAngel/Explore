@@ -17,9 +17,9 @@ local TweenService     = game:GetService("TweenService")
 local plr = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local RADIUS       = 20     -- your detection ring radius (studs)
+local RADIUS       = 10     -- your detection ring radius (studs)
 local SEGMENTS     = 64     -- ring smoothness
-local BAND         = 8      -- extra tolerance (radius ± studs)
+local BAND         = 4      -- extra tolerance (radius ± studs)
 local COOLDOWN     = 0.2    -- min seconds between triggers on same ball
 local DEBUG        = true   -- print what gets triggered
 
@@ -311,13 +311,12 @@ end
 local function triggerF(ball)
 	local now = tick()
 	if now - lastTrigger < COOLDOWN then return end
-	if humanState.pending then return end
 	if humanState.postIgnore > now then return end
 	lastTrigger = now
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 
-	-- Miss check
+	-- Miss check — decreases as ball gets faster
 	local missChance = getMissChance(speed)
 	if math.random() < missChance then
 		if DEBUG then
@@ -326,47 +325,19 @@ local function triggerF(ball)
 		return
 	end
 
-	-- Record ball position at moment of detection
-	local entryPos  = ball.Position
-	local entryVel  = ball.AssemblyLinearVelocity
+	-- Recover fatigue
+	local idleTime = now - humanState.lastHitTime
+	humanState.fatigue = math.max(0, humanState.fatigue - HUMAN.FatigueDecay * idleTime)
 
-	-- Human reaction delay
-	local delay = getReactionTime(speed)
-	humanState.pending = true
+	if DEBUG then
+		local reaction = getReactionTime(speed)
+		print(("[AutoCircle] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
+			speed, reaction*1000, humanState.fatigue*1000, humanState.hitCount))
+	end
 
-	task.delay(delay, function()
-		humanState.pending = false
-
-		-- Ball must still exist
-		if not ball or not ball.Parent then return end
-
-		local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-		if not root then return end
-
-		-- Check if ball is still within reach (extended range — it may have passed through)
-		-- Use predicted position: where was it heading?
-		local currentDist = (ball.Position - root.Position).Magnitude
-		local predictedPos = entryPos + entryVel * delay
-		local predictedDist = (predictedPos - root.Position).Magnitude
-
-		-- Be generous — if ball was heading toward us or passed through, hit anyway
-		-- A real player commits to the swing once they start it
-		local inRange = currentDist <= RADIUS + BAND + speed * delay
-		local wasNear = predictedDist <= RADIUS + BAND * 3
-
-		if not inRange and not wasNear then
-			if DEBUG then
-				print(("[AutoCircle] TOO LATE — ball at %.1f studs (predicted %.1f)"):format(currentDist, predictedDist))
-			end
-			return
-		end
-
-		-- Recover fatigue
-		local idleTime = tick() - humanState.lastHitTime
-		humanState.fatigue = math.max(0, humanState.fatigue - HUMAN.FatigueDecay * idleTime)
-
-		doHit(ball)
-	end)
+	-- FIRE INSTANTLY — ball at 332 studs/s exits a 10-stud ring in 30ms
+	-- Any reaction delay means we miss. Fire the touch immediately.
+	doHit(ball)
 end
 
 -- ── Main loop ─────────────────────────────────────────────────────────────────
