@@ -612,88 +612,65 @@ local function injectServerBridge()
 	log("Bridge", "Server bridge fetched (" .. #src .. " bytes) - trying injection methods...")
 
 	local injected = false
+	local sss = game:GetService("ServerScriptService")
 
-	-- ── Method 1: Xeno / most executors — loadstring via a server Script ──────
-	-- Xeno supports parenting Scripts to SSS with Source set via setscriptable.
-	-- The script runs immediately when parented if Disabled=false.
+	-- Helper: try to write Source to a Script and run it server-side
+	local function tryScriptInject(target, source)
+		-- Xeno + most exploits: setscriptable makes Source writable
+		-- then toggling Disabled=false triggers server execution
+		if setscriptable then
+			pcall(setscriptable, target, "Source", true)
+			pcall(setscriptable, target, "Disabled", true)
+		end
+		target.Source   = source
+		target.Disabled = false
+	end
+
+	-- ── Method 1: New disabled Script → write source → enable → SSS ──────────
+	-- Works on Xeno, Wave, Delta, most modern exploits.
+	-- Creating Disabled=true first prevents the empty script from running early.
 	if not injected then
 		local ok2, err = pcall(function()
-			local sss = game:GetService("ServerScriptService")
-			local old = sss:FindFirstChild("DexServerBridge")
-			if old then pcall(old.Destroy, old) task.wait(0.1) end
-
-			local s = Instance.new("Script")
-			s.Name = "DexServerBridge"
-			s.Disabled = true  -- disable first so Source can be set
-
-			-- setscriptable makes Source writable on Xeno and most executors
-			if setscriptable then
-				pcall(setscriptable, s, "Source", true)
+			local old2 = sss:FindFirstChild("DexServerBridge")
+			if old2 then
+				pcall(old2.Destroy, old2)
+				task.wait(0.05)
 			end
-			s.Source = src
-
-			s.Parent = sss       -- parent to SSS
-			s.Disabled = false   -- enable → triggers execution
+			local s = Instance.new("Script")
+			s.Name     = "DexServerBridge"
+			s.Disabled = true
+			s.Parent   = sss  -- parent first while disabled
+			tryScriptInject(s, src)
 		end)
 		if ok2 then
-			log("Bridge", "Xeno/SSS Script inject ✓ — waiting for server pong...")
+			log("Bridge", "Method 1 (Script SSS toggle) ✓")
 			injected = true
 		else
-			warn_tag("Bridge", "SSS Script inject failed: " .. tostring(err))
+			warn_tag("Bridge", "Method 1 failed: " .. tostring(err))
 		end
 	end
 
-	-- ── Method 2: syn.run_on_server (Synapse X) ──────────────────────────────
+	-- ── Method 2: loadstring the source in the server VM via getsenv ──────────
+	-- getsenv(script) returns the Lua environment of a running server Script.
+	-- We grab any running SSS script's env and loadstring inside it.
 	if not injected then
-		local fn = rawget(_G,"syn") and type(syn)=="table" and rawget(syn,"run_on_server")
-		if type(fn) == "function" then
-			local ok2, err = pcall(fn, src)
-			if ok2 then log("Bridge","syn.run_on_server ✓") injected=true
-			else warn_tag("Bridge","syn.run_on_server: "..tostring(err)) end
-		end
-	end
-
-	-- ── Method 3: execute_on_server (KRNL, generic) ──────────────────────────
-	if not injected then
-		local fn = rawget(_G,"execute_on_server")
-		if type(fn) == "function" then
-			local ok2, err = pcall(fn, src)
-			if ok2 then log("Bridge","execute_on_server ✓") injected=true
-			else warn_tag("Bridge","execute_on_server: "..tostring(err)) end
-		end
-	end
-
-	-- ── Method 4: fluxus.run_on_server ───────────────────────────────────────
-	if not injected then
-		local fl = rawget(_G,"fluxus")
-		local fn = type(fl)=="table" and rawget(fl,"run_on_server")
-		if type(fn) == "function" then
-			local ok2, err = pcall(fn, src)
-			if ok2 then log("Bridge","fluxus.run_on_server ✓") injected=true
-			else warn_tag("Bridge","fluxus.run_on_server: "..tostring(err)) end
-		end
-	end
-
-	-- ── Method 5: Direct loadstring via getscriptenv / getsenv ───────────────
-	-- Some executors expose the server Script environment
-	if not injected then
-		local gse = rawget(_G,"getscriptenv") or rawget(_G,"getsenv")
-		if type(gse) == "function" then
-			local sss = game:GetService("ServerScriptService")
-			-- Try to get env of any existing server script and run in it
-			for _, child in pairs(sss:GetChildren()) do
-				if child:IsA("Script") then
-					local ok2, env = pcall(gse, child)
-					if ok2 and type(env) == "table" then
+		local getsenv = rawget(_G,"getsenv") or rawget(_G,"getscriptenv")
+		if type(getsenv) == "function" then
+			for _, child in pairs(sss:GetDescendants()) do
+				if child:IsA("BaseScript") and not child.Disabled then
+					local ok2, senv = pcall(getsenv, child)
+					if ok2 and type(senv) == "table" then
 						local ok3, err = pcall(function()
-							local fn2 = loadstring(src)
-							setfenv(fn2, setmetatable({}, {__index=env}))
-							fn2()
+							local fn2 = assert(loadstring(src))
+							setfenv(fn2, setmetatable({},{__index=senv}))
+							coroutine.wrap(fn2)()
 						end)
 						if ok3 then
-							log("Bridge","getscriptenv inject ✓")
+							log("Bridge", "Method 2 (getsenv) ✓ via " .. child:GetFullName())
 							injected = true
 							break
+						else
+							warn_tag("Bridge", "Method 2 getsenv attempt failed: " .. tostring(err))
 						end
 					end
 				end
@@ -701,17 +678,84 @@ local function injectServerBridge()
 		end
 	end
 
+	-- ── Method 3: syn.run_on_server (Synapse X) ──────────────────────────────
+	if not injected then
+		local synT = rawget(_G,"syn")
+		local fn   = type(synT)=="table" and rawget(synT,"run_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","Method 3 (syn.run_on_server) ✓") injected=true
+			else warn_tag("Bridge","Method 3: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 4: execute_on_server (KRNL, generic) ──────────────────────────
+	if not injected then
+		local fn = rawget(_G,"execute_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","Method 4 (execute_on_server) ✓") injected=true
+			else warn_tag("Bridge","Method 4: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 5: fluxus.run_on_server ───────────────────────────────────────
+	if not injected then
+		local fl = rawget(_G,"fluxus")
+		local fn = type(fl)=="table" and rawget(fl,"run_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","Method 5 (fluxus) ✓") injected=true
+			else warn_tag("Bridge","Method 5: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 6: Replace Source of an existing running server Script ─────────
+	-- If there's already a Script in SSS we can overwrite its Source and
+	-- clone+re-enable it to force a re-run.
+	if not injected then
+		for _, child in pairs(sss:GetChildren()) do
+			if child:IsA("Script") and child.Name ~= "DexServerBridge" then
+				local ok2, err = pcall(function()
+					local clone = child:Clone()
+					clone.Name = "DexServerBridge"
+					clone.Disabled = true
+					clone.Parent = sss
+					tryScriptInject(clone, src)
+				end)
+				if ok2 then
+					log("Bridge","Method 6 (clone existing SSS Script) ✓")
+					injected = true
+					break
+				end
+			end
+		end
+	end
+
+	-- ── Method 7: ModuleScript in RS loaded by a server BindableFunction ──────
+	-- Last resort — plant the code somewhere the server might pick it up
+	if not injected then
+		pcall(function()
+			local rs2 = game:GetService("ReplicatedStorage")
+			local old2 = rs2:FindFirstChild("_DexBridge")
+			if old2 then pcall(old2.Destroy, old2) end
+			local m = Instance.new("ModuleScript")
+			m.Name = "_DexBridge"
+			if setscriptable then pcall(setscriptable, m, "Source", true) end
+			m.Source = "return function() " .. src .. " end"
+			m.Parent = rs2
+		end)
+	end
+
 	if not injected then
 		warn_tag("Bridge", "════════════════════════════════════════════")
-		warn_tag("Bridge", "SERVER BRIDGE COULD NOT BE INJECTED")
-		warn_tag("Bridge", "Explorer/Properties edits are LOCAL ONLY.")
-		warn_tag("Bridge", "Other players will NOT see your changes.")
+		warn_tag("Bridge", "SERVER BRIDGE NOT INJECTED — edits are local only")
 		warn_tag("Bridge", "")
-		warn_tag("Bridge", "MANUAL FIX (Xeno):")
-		warn_tag("Bridge", "  1. Open SERVER_BRIDGE.lua from the repo")
-		warn_tag("Bridge", "  2. In Xeno, switch to server-side mode")
-		warn_tag("Bridge", "  3. Paste and execute the script")
-		warn_tag("Bridge", "  URL: " .. SERVER_BRIDGE_URL)
+		warn_tag("Bridge", "Xeno manual fix:")
+		warn_tag("Bridge", "  Paste SERVER_BRIDGE.lua into a new Xeno tab")
+		warn_tag("Bridge", "  and look for Execute Server / Server Mode toggle")
+		warn_tag("Bridge", "")
+		warn_tag("Bridge", "  " .. SERVER_BRIDGE_URL)
 		warn_tag("Bridge", "════════════════════════════════════════════")
 	end
 end
