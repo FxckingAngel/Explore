@@ -365,6 +365,9 @@ if not game:FindFirstChild("ServerScriptService") then
 		local bridge = Instance.new("RemoteEvent")
 		bridge.Name = "DexBridge"
 		bridge.Parent = rs
+		print("[DexBridge] connected UWU (created)")
+	else
+		print("[DexBridge] connected UWU")
 	end
 	if not rs:FindFirstChild("DexBridgeList") then
 		local listFn = Instance.new("RemoteFunction")
