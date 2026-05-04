@@ -271,45 +271,42 @@ local function destroyRing(parts)
 end
 
 -- ── Trigger ───────────────────────────────────────────────────────────────────
+local VIM = game:GetService("VirtualInputManager")
+
 local function doHit(ball)
 	if not ball or not ball.Parent then return end
-	local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
-
 	if DEBUG then
-		print(("[AutoCircle] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
-			speed,
-			getReactionTime(speed) * 1000,
-			humanState.fatigue * 1000,
-			humanState.hitCount
-		))
+		print(("[AutoCircle] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
-	-- firetouchinterest — simulate contact
-	pcall(firetouchinterest, root, ball, 0)
-	pcall(firetouchinterest, ball, root, 0)
-	task.wait(rng(0.03, 0.06))
-	pcall(firetouchinterest, root, ball, 1)
-	pcall(firetouchinterest, ball, root, 1)
+	-- Game uses Mouse1 click to swing sword at ball
+	-- Simulate click at ball's screen position
+	local camera = workspace.CurrentCamera
+	local screenPos, onScreen = camera:WorldToScreenPoint(ball.Position)
 
-	-- ClickDetector if present
-	local click = ball:FindFirstChildWhichIsA("ClickDetector", true)
-	if not click then
-		local m = ball:FindFirstAncestorWhichIsA("Model")
-		if m then click = m:FindFirstChildWhichIsA("ClickDetector", true) end
-	end
-	if click then pcall(fireclickdetector, click) end
-
-	-- F key with human hold time
 	pcall(function()
-		game:GetService("VirtualInputManager"):SendKeyEvent(true,  Enum.KeyCode.F, false, game)
-		task.wait(rng(0.05, 0.11))  -- human key hold duration varies
-		game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.F, false, game)
+		if onScreen then
+			-- Click directly on ball
+			VIM:SendMouseMoveEvent(screenPos.X, screenPos.Y, game)
+			task.wait(0.008)
+			VIM:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true,  game, 1)
+			task.wait(rng(0.05, 0.10))
+			VIM:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
+		else
+			-- Ball not on screen, click center
+			local cx = camera.ViewportSize.X / 2
+			local cy = camera.ViewportSize.Y / 2
+			VIM:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
+			task.wait(rng(0.05, 0.10))
+			VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+		end
 	end)
 
-	-- Update state
 	humanState.hitCount    = humanState.hitCount + 1
 	humanState.lastHitTime = tick()
 	humanState.postIgnore  = tick() + HUMAN.PostHitIgnore
