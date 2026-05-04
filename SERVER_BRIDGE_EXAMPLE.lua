@@ -28,20 +28,32 @@ local function findByPath(path)
 end
 
 bridge.OnServerEvent:Connect(function(player, payload)
-	if type(payload) ~= "table" or payload.Type ~= "ScriptViewerSync" then return end
-	local source = payload.Source
-	if type(source) ~= "string" then return end
-
 	local target = findByPath(payload.TargetPath)
-	if not target or not target:IsA("LuaSourceContainer") then return end
+	if type(payload) ~= "table" then return end
+	if payload.Type == "ScriptViewerSync" then
+		local source = payload.Source
+		if type(source) ~= "string" then return end
+		if not target or not target:IsA("LuaSourceContainer") then return end
 
-	-- WARNING: Most live games block Source edits on server for security.
-	-- This works only in Studio/plugins/authorized environments.
-	local ok, err = pcall(function()
-		target.Source = source
-	end)
-	if not ok then
-		warn("[DexBridge] Failed to apply source from", player, err)
+		-- WARNING: Most live games block Source edits on server for security.
+		local ok, err = pcall(function()
+			target.Source = source
+		end)
+		if not ok then
+			warn("[DexBridge] Failed to apply source from", player, err)
+		end
+	elseif payload.Type == "ExplorerLiveEdit" and payload.Action == "Delete" then
+		if target then
+			pcall(function()
+				target:Destroy()
+			end)
+		end
+	elseif payload.Type == "ExplorerLiveEdit" and type(payload.Action) == "string" and payload.Action:sub(1,16) == "PropertyChanged:" then
+		-- Hook point for server-side property sync if you want strict mirroring.
+		-- Keeping as a log by default to avoid unsafe arbitrary property writes.
+		warn("[DexBridge] Property change from", player, payload.Action, payload.TargetPath)
+	elseif payload.Type == "PropertiesLiveEdit" then
+		warn("[DexBridge] Properties edit from", player, payload.Action, payload.TargetPath)
 	end
 end)
 
