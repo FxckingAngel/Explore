@@ -45,6 +45,32 @@ local function main()
 	local isa = game.IsA
 	local getAttribute = game.GetAttribute
 	local setAttribute = game.SetAttribute
+	local bridgeRemote
+
+	local function resolveBridge()
+		if bridgeRemote and bridgeRemote.Parent then return bridgeRemote end
+		local rs = game:GetService("ReplicatedStorage")
+		bridgeRemote = rs:FindFirstChild("DexBridge") or rs:FindFirstChild("ScriptBridge")
+		if bridgeRemote then
+			print("[DexBridge] connected UWU")
+		end
+		return bridgeRemote
+	end
+
+	local function pushBridgePropEdit(obj, propName)
+		if not Settings.Properties.LiveEditMode then return end
+		local remote = resolveBridge()
+		if not remote or not remote:IsA("RemoteEvent") then return end
+		local path = ""
+		pcall(function() path = obj:GetFullName() end)
+		remote:FireServer({
+			Type = "PropertiesLiveEdit",
+			Action = "PropertyChanged:"..tostring(propName),
+			TargetPath = path,
+			TargetName = obj and obj.Name or "",
+			Time = os.time(),
+		})
+	end
 
 	Properties.GuiElems = {}
 	Properties.Index = 0
@@ -1346,11 +1372,12 @@ local function main()
 						setVal = root or PhysicalProperties.new(obj.Material)
 					end
 
-					if prop.IsAttribute then setAttribute(obj,attributeName,setVal)
-					else obj[propName] = setVal end
-				end)
+						if prop.IsAttribute then setAttribute(obj,attributeName,setVal)
+						else obj[propName] = setVal end
+						pushBridgePropEdit(obj, propName)
+					end)
+				end
 			end
-		end
 		if not noupdate then Properties.ComputeConflicts(prop) end
 	end
 

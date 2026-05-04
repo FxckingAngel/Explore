@@ -34,7 +34,8 @@ end
 local function main()
 	local Lib = {}
 
-	local renderStepped = service.RunService.RenderStepped
+	local runService = (service and service.RunService) or game:GetService("RunService")
+	local renderStepped = runService.RenderStepped
 	local signalWait = renderStepped.wait
 	local PH = newproxy() -- Placeholder, must be replaced in constructor
 	local SIGNAL = newproxy()
@@ -398,8 +399,14 @@ local function main()
 
 	Lib.FetchCustomAsset = function(url,filepath)
 		if not env.writefile then return end
-		local s,data = pcall(game.HttpGet,game,url)
-		if not s then return end
+		local s,data = pcall(function()
+			return game:HttpGet(url)
+		end)
+		if not s or type(data) ~= "string" or #data == 0 then return end
+		local lowerData = string.lower(data)
+		if lowerData:find("<html",1,true) or lowerData:find("<!doctype html",1,true) then
+			return
+		end
 		env.writefile(filepath,data)
 		return Lib.LoadCustomAsset(filepath)
 	end

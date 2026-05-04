@@ -33,6 +33,7 @@ end
 
 local function main()
 	local Explorer = {}
+	local bridgeRemote
 	local nodes,tree,listEntries,explorerOrders,searchResults,specResults = {},{},{},{},{},{}
 	local expanded
 	local entryTemplate,treeFrame,toolBar,descendantAddedCon,descendantRemovingCon,itemChangedCon
@@ -49,6 +50,31 @@ local function main()
 	local nilMap,nilCons = {},{}
 	local connectSignal = game.DescendantAdded.Connect
 	local addObject,removeObject,moveObject = nil,nil,nil
+
+	local function resolveBridge()
+		if bridgeRemote and bridgeRemote.Parent then return bridgeRemote end
+		local rs = game:GetService("ReplicatedStorage")
+		bridgeRemote = rs:FindFirstChild("DexBridge") or rs:FindFirstChild("ScriptBridge")
+		if bridgeRemote then
+			print("[DexBridge] connected UWU")
+		end
+		return bridgeRemote
+	end
+
+	local function pushBridgeAction(action, obj)
+		if not Settings.Explorer.LiveEditMode then return end
+		local remote = resolveBridge()
+		if not remote or not remote:IsA("RemoteEvent") then return end
+		local path = ""
+		pcall(function() path = obj:GetFullName() end)
+		remote:FireServer({
+			Type = "ExplorerLiveEdit",
+			Action = action,
+			TargetPath = path,
+			TargetName = obj and obj.Name or "",
+			Time = os.time(),
+		})
+	end
 
 	addObject = function(root)
 		if nodes[root] then return end
@@ -728,10 +754,16 @@ local function main()
 			itemChangedCon = game.ItemChanged:Connect(function(obj,prop)
 				if prop == "Parent" and nodes[obj] then moveObject(obj)
 				elseif prop == "Name" and nodes[obj] then nodes[obj].NameWidth = nil end
+				if nodes[obj] then
+					pushBridgeAction("PropertyChanged:"..tostring(prop), obj)
+				end
 			end)
 		else
 			itemChangedCon = game.ItemChanged:Connect(function(obj,prop)
 				if prop == "Parent" and nodes[obj] then moveObject(obj) end
+				if nodes[obj] then
+					pushBridgeAction("PropertyChanged:"..tostring(prop), obj)
+				end
 			end)
 		end
 	end
@@ -916,7 +948,10 @@ local function main()
 		context:Register("DELETE",{Name="Delete",IconMap=Explorer.MiscIcons,Icon="Delete",DisabledIcon="Delete_Disabled",Shortcut="Del",OnClick=function()
 			local destroy=game.Destroy
 			local sList=selection.List
-			for i=1,#sList do pcall(destroy,sList[i].Obj) end
+			for i=1,#sList do
+				pushBridgeAction("Delete", sList[i].Obj)
+				pcall(destroy,sList[i].Obj)
+			end
 			selection:Clear()
 		end})
 
@@ -1284,7 +1319,7 @@ local function main()
 		local sub=string.sub
 		local lower=string.lower
 		local match=string.match
-		local ops={["("]="(",[")"]=")","||"=" or ","&&"=" and "}
+		local ops={["("]="(",[")"]=")",["||"]=" or ",["&&"]=" and "}
 		local filterCount=0
 		local compFilters=Explorer.SearchFilters.Comparison
 		local specFilters=Explorer.SearchFilters.Specific
