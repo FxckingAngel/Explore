@@ -141,25 +141,40 @@ end
 -- We detect it by: name="Sword", parent.Name="SwordWelds", velocity > 80 studs/s
 -- 80 studs/s threshold: fast enough to be a thrown/hit ball, not someone walking
 
-local BALL_MIN_VELOCITY = 80  -- studs/s — ball in flight is always above this
+-- The ball in this Deathball game is:
+--   Workspace.FX.RockTemplate
+--   size ~0.648 x 0.648 x 0.648 (roughly cubic)
+--   parent = Workspace.FX
+--   no mesh, Block shape, moves at 40+ studs/s during play
+
+local BALL_MIN_VELOCITY = 15  -- studs/s minimum to count as in-play
 
 local function looksLikeBall(obj)
 	if not obj:IsA("BasePart") then return false end
 	if obj.Anchored then return false end
 
-	-- Must be named Sword inside SwordWelds
-	if obj.Name ~= "Sword" then return false end
-	if not obj.Parent or obj.Parent.Name ~= "SwordWelds" then return false end
+	-- Skip player parts
+	for _, p in pairs(Players:GetPlayers()) do
+		local c = p.Character
+		if c and obj:IsDescendantOf(c) then return false end
+	end
 
-	-- Must be moving fast — in flight, not held by a walking player
-	local vel = obj.AssemblyLinearVelocity.Magnitude
-	if vel < BALL_MIN_VELOCITY then return false end
+	-- Primary match: RockTemplate in FX
+	if obj.Name == "RockTemplate" and obj.Parent and obj.Parent.Name == "FX" then
+		return obj.AssemblyLinearVelocity.Magnitude >= BALL_MIN_VELOCITY
+	end
 
-	-- Must NOT belong to our own character
-	local c = plr.Character
-	if c and obj:IsDescendantOf(c) then return false end
+	-- Fallback: any small roughly-cubic fast-moving object in FX folder
+	if obj.Parent and obj.Parent.Name == "FX" then
+		local s = obj.Size
+		local ratio = math.max(s.X,s.Y,s.Z) / math.max(0.01, math.min(s.X,s.Y,s.Z))
+		local vel = obj.AssemblyLinearVelocity.Magnitude
+		if ratio < 1.5 and vel >= BALL_MIN_VELOCITY and s.Magnitude < 3 then
+			return true
+		end
+	end
 
-	return true
+	return false
 end
 
 -- Find the FASTEST moving non-player meshed object = the ball
