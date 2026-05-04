@@ -24,6 +24,7 @@ local RING_COLOR  = Color3.fromRGB(0, 200, 255)
 local HIT_COLOR   = Color3.fromRGB(255, 60, 60)
 local BAND        = 4         -- how close to radius edge counts as "touching"
 local COOLDOWN    = 0.1       -- seconds between auto-presses per object
+local DEBUG       = true      -- print what objects are detected (set false to silence)
 
 -- ── State ─────────────────────────────────────────────────────────────────────
 local active     = false
@@ -191,8 +192,19 @@ local function update()
 		if playerParts[obj] then return false end
 		-- Skip environment/map geometry
 		if isEnvironment(obj) then return false end
-		-- Must be moving (not anchored) OR be a Tool/model that makes sense to trigger
-		if obj.Anchored and not obj:FindFirstAncestorWhichIsA("Tool") then return false end
+		-- Must be either:
+		--   a) Not anchored (can move freely)
+		--   b) Actually moving (has velocity) even if somehow anchored
+		--   c) Inside a Tool
+		if obj.Anchored then
+			local vel = obj.AssemblyLinearVelocity
+			local isMoving = vel and vel.Magnitude > 1
+			local isTool = obj:FindFirstAncestorWhichIsA("Tool") ~= nil
+			if not isMoving and not isTool then return false end
+		end
+		-- Skip tiny parts (< 0.5 stud volume) — likely hitbox decorations
+		local s = obj.Size
+		if s.X < 0.5 and s.Y < 0.5 and s.Z < 0.5 then return false end
 		return true
 	end
 
