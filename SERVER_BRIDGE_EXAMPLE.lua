@@ -10,6 +10,13 @@ if not bridge then
 	bridge.Parent = ReplicatedStorage
 end
 
+local listFn = ReplicatedStorage:FindFirstChild("DexBridgeList")
+if not listFn then
+	listFn = Instance.new("RemoteFunction")
+	listFn.Name = "DexBridgeList"
+	listFn.Parent = ReplicatedStorage
+end
+
 local function findByPath(path)
 	if type(path) ~= "string" or path == "" then return nil end
 	local cur = game
@@ -37,3 +44,15 @@ bridge.OnServerEvent:Connect(function(player, payload)
 		warn("[DexBridge] Failed to apply source from", player, err)
 	end
 end)
+
+listFn.OnServerInvoke = function()
+	local sss = game:FindFirstChild("ServerScriptService")
+	if not sss then return {} end
+	local out = {}
+	for _, obj in ipairs(sss:GetDescendants()) do
+		if obj:IsA("LuaSourceContainer") then
+			out[#out+1] = {Name = obj.Name, Path = obj:GetFullName(), ClassName = obj.ClassName}
+		end
+	end
+	return out
+end

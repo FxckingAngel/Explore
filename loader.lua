@@ -69,6 +69,7 @@ applyDefaults({
 		ClickToRename = true,
 		AutoUpdateSearch = true,
 		AutoUpdateMode = 0,
+		LiveEditMode = true,
 		PartSelectionBox = true,
 		GuiSelectionBox = true,
 		CopyPathUseGetChildren = true,
@@ -83,6 +84,7 @@ applyDefaults({
 		LoadstringInput = true,
 		NumberRounding = 3,
 		ShowAttributes = false,
+		LiveEditMode = true,
 		MaxAttributes = 50,
 		ScaleType = 1,
 	},
@@ -350,9 +352,48 @@ SVControl.InitAfterMain(appTable)
 
 -- Init window system then each app
 print("[Dex] Building UI...")
-	Lib.Window.Init()
-	Explorer.Init()
-	Properties.Init()
+if not game:FindFirstChild("ServerScriptService") then
+	local sssMirror = Instance.new("Folder")
+	sssMirror.Name = "ServerScriptService"
+	local marker = Instance.new("StringValue")
+	marker.Name = "__BridgeMirror"
+	marker.Value = "Client-side mirror for bridge editing"
+	marker.Parent = sssMirror
+
+	local rs = game:GetService("ReplicatedStorage")
+	if not rs:FindFirstChild("DexBridge") then
+		local bridge = Instance.new("RemoteEvent")
+		bridge.Name = "DexBridge"
+		bridge.Parent = rs
+	end
+	if not rs:FindFirstChild("DexBridgeList") then
+		local listFn = Instance.new("RemoteFunction")
+		listFn.Name = "DexBridgeList"
+		listFn.Parent = rs
+	end
+	local listFn = rs:FindFirstChild("DexBridgeList")
+	if listFn and listFn:IsA("RemoteFunction") then
+		local ok, entries = pcall(function()
+			return listFn:InvokeServer()
+		end)
+		if ok and type(entries) == "table" then
+			for i = 1, #entries do
+				local entry = entries[i]
+				if type(entry) == "table" and type(entry.Name) == "string" then
+					local node = Instance.new("StringValue")
+					node.Name = entry.Name
+					node.Value = entry.Path or entry.Name
+					node.Parent = sssMirror
+				end
+			end
+		end
+	end
+
+	sssMirror.Parent = game
+end
+Lib.Window.Init()
+Explorer.Init()
+Properties.Init()
 	local okSV, svErr = pcall(function()
 		ScriptViewer.Init()
 	end)

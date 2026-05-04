@@ -225,6 +225,12 @@ local function main()
 		bridgeRemote = rs:FindFirstChild("DexBridge")
 			or rs:FindFirstChild("LocalGUIEnabler")
 			or rs:FindFirstChild("ScriptBridge")
+		if not bridgeRemote then
+			local auto = Instance.new("RemoteEvent")
+			auto.Name = "DexBridge"
+			auto.Parent = rs
+			bridgeRemote = auto
+		end
 		return bridgeRemote
 	end
 
