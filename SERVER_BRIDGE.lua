@@ -198,6 +198,54 @@ bridge.OnServerEvent:Connect(function(player, payload)
 				sendToClient(player, {Type="ServerLog", Message="[Error] Rename failed: " .. tostring(err)})
 			end
 
+		-- PASTE / DUPLICATE (clone already happened client-side, we replicate it server-side)
+		elseif action == "Paste" then
+			local clonePath  = tostring(payload.ClonePath or "")
+			local parentPath = tostring(payload.ParentPath or "")
+			-- The cloned instance already exists on the client but NOT on server
+			-- We need to find the original (before clone) and clone it server-side
+			-- Best effort: find by path after the paste
+			local cloned = findByPath(clonePath)
+			if cloned then
+				log("Explorer", "Paste already visible server-side: " .. clonePath)
+				sendToClient(player, {Type="ServerLog", Message="[OK] Paste visible: " .. clonePath})
+			else
+				-- Try to find parent and create a placeholder note
+				warn_tag("Explorer", "Paste: clone not visible server-side yet: " .. clonePath)
+				sendToClient(player, {Type="ServerLog", Message="[Info] Paste: " .. clonePath .. " (may need server script to replicate)"})
+			end
+
+		-- CREATE INSTANCE (from Group etc)
+		elseif action == "CreateInstance" then
+			local className  = tostring(payload.ClassName or "Model")
+			local parentPath = tostring(payload.ParentPath or "")
+			local instPath   = tostring(payload.InstancePath or "")
+			-- Check if already exists (client created it, may be replicated)
+			local existing = findByPath(instPath)
+			if existing then
+				log("Explorer", "CreateInstance already server-side: " .. instPath)
+				sendToClient(player, {Type="ServerLog", Message="[OK] Instance exists: " .. instPath})
+			else
+				local parent = findByPath(parentPath)
+				if not parent then
+					warn_tag("Explorer", "CreateInstance: parent not found: " .. parentPath)
+					sendToClient(player, {Type="ServerLog", Message="[Error] Parent not found: " .. parentPath})
+				else
+					local ok, inst = pcall(function()
+						local i = Instance.new(className)
+						i.Parent = parent
+						return i
+					end)
+					if ok and inst then
+						log("Explorer", "Created " .. className .. " in " .. parentPath)
+						sendToClient(player, {Type="ServerLog", Message="[OK] Created " .. className .. " in " .. parentPath})
+					else
+						warn_tag("Explorer", "CreateInstance failed: " .. tostring(inst))
+						sendToClient(player, {Type="ServerLog", Message="[Error] Create failed: " .. tostring(inst)})
+					end
+				end
+			end
+
 		-- REPARENT
 		elseif action == "Reparent" then
 			local target    = findByPath(path)

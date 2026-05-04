@@ -929,11 +929,17 @@ local function main()
 			for i=1,#sList do
 				local node=sList[i]
 				local inst=node.Obj
+				local destPath=""
+				pcall(function() destPath=inst:GetFullName() end)
 				Explorer.MakeNodeVisible(node,true)
 				for c=1,#clipboard do
 					local cloned=clipboard[c]:Clone()
 					if cloned then
 						cloned.Parent=inst
+						local clonedPath=""
+						pcall(function() clonedPath=cloned:GetFullName() end)
+						print("[DexBridge] -> Paste: "..clonedPath.." into "..destPath)
+						pushBridgeAction("Paste", cloned, {ParentPath=destPath, ClonePath=clonedPath})
 						local clonedNode=nodes[cloned]
 						if clonedNode then newSelection[count]=clonedNode count=count+1 end
 					end
@@ -952,10 +958,16 @@ local function main()
 				local node=sList[i]
 				local inst=node.Obj
 				local instPar=node.Parent and node.Parent.Obj
+				local parPath=""
+				pcall(function() parPath=instPar:GetFullName() end)
 				Explorer.MakeNodeVisible(node)
 				local s,cloned=pcall(clone,inst)
 				if s and cloned then
 					cloned.Parent=instPar
+					local clonedPath=""
+					pcall(function() clonedPath=cloned:GetFullName() end)
+					print("[DexBridge] -> Duplicate: "..clonedPath.." in "..parPath)
+					pushBridgeAction("Paste", cloned, {ParentPath=parPath, ClonePath=clonedPath})
 					local clonedNode=nodes[cloned]
 					if clonedNode then newSelection[count]=clonedNode count=count+1 end
 				end
@@ -986,8 +998,23 @@ local function main()
 		context:Register("GROUP",{Name="Group",IconMap=Explorer.MiscIcons,Icon="Group",DisabledIcon="Group_Disabled",Shortcut="Ctrl+G",OnClick=function()
 			local sList=selection.List
 			if #sList==0 then return end
-			local model=Instance.new("Model",sList[#sList].Obj.Parent)
-			for i=1,#sList do pcall(function() sList[i].Obj.Parent=model end) end
+			local parObj=sList[#sList].Obj.Parent
+			local model=Instance.new("Model",parObj)
+			local modelPath=""
+			pcall(function() modelPath=model:GetFullName() end)
+			for i=1,#sList do
+				local obj=sList[i].Obj
+				local oldPath=""
+				pcall(function() oldPath=obj:GetFullName() end)
+				pcall(function() obj.Parent=model end)
+				print("[DexBridge] -> Group reparent: "..oldPath.." -> "..modelPath)
+				pushBridgeAction("Reparent", obj, {NewParentPath=modelPath, OldPath=oldPath})
+			end
+			-- Tell server to create the model too
+			local parPath=""
+			pcall(function() parPath=parObj:GetFullName() end)
+			print("[DexBridge] -> Group create Model in "..parPath)
+			pushBridgeAction("CreateInstance", model, {ClassName="Model", ParentPath=parPath, InstancePath=modelPath})
 			if nodes[model] then selection:Set(nodes[model]) Explorer.ViewNode(nodes[model]) end
 		end})
 
@@ -997,6 +1024,10 @@ local function main()
 			local isa=game.IsA
 			local function ungroup(node)
 				local par=node.Parent.Obj
+				local parPath=""
+				pcall(function() parPath=par:GetFullName() end)
+				local modelPath=""
+				pcall(function() modelPath=node.Obj:GetFullName() end)
 				local ch={}
 				local chCount=1
 				for i=1,#node do
@@ -1006,7 +1037,16 @@ local function main()
 					count=count+1
 					chCount=chCount+1
 				end
-				for i=1,#ch do pcall(function() ch[i].Obj.Parent=par end) end
+				for i=1,#ch do
+					local obj=ch[i].Obj
+					local oldPath=""
+					pcall(function() oldPath=obj:GetFullName() end)
+					pcall(function() obj.Parent=par end)
+					print("[DexBridge] -> Ungroup reparent: "..oldPath.." -> "..parPath)
+					pushBridgeAction("Reparent", obj, {NewParentPath=parPath, OldPath=oldPath})
+				end
+				print("[DexBridge] -> Ungroup delete model: "..modelPath)
+				pushBridgeAction("Delete", node.Obj)
 				node.Obj:Destroy()
 			end
 			for i,v in next,selection.List do
