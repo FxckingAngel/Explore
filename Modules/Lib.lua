@@ -2395,6 +2395,933 @@ local function main()
 		return {new = new}
 	end)()
 
+	Lib.BrickColorPicker = (function()
+		local funcs = {}
+		local paletteCount = 0
+		local mouse = service.Players.LocalPlayer:GetMouse()
+		local hexStartX = 4
+		local hexSizeX = 27
+		local hexTriangleStart = 1
+		local hexTriangleSize = 8
+
+		local bottomColors = {
+			Color3.fromRGB(17,17,17),Color3.fromRGB(99,95,98),Color3.fromRGB(163,162,165),
+			Color3.fromRGB(205,205,205),Color3.fromRGB(223,223,222),Color3.fromRGB(237,234,234),
+			Color3.fromRGB(27,42,53),Color3.fromRGB(91,93,105),Color3.fromRGB(159,161,172),
+			Color3.fromRGB(202,203,209),Color3.fromRGB(231,231,236),Color3.fromRGB(248,248,248)
+		}
+
+		local function isMouseInHexagon(hex)
+			local relativeX = mouse.X - hex.AbsolutePosition.X
+			local relativeY = mouse.Y - hex.AbsolutePosition.Y
+			if relativeX >= hexStartX and relativeX < hexStartX + hexSizeX then
+				relativeX = relativeX - 4
+				local relativeWidth = (13-math.min(relativeX,26-relativeX))/13
+				if relativeY >= hexTriangleStart + hexTriangleSize*relativeWidth and relativeY < hex.AbsoluteSize.Y - hexTriangleStart - hexTriangleSize*relativeWidth then
+					return true
+				end
+			end
+			return false
+		end
+
+		local function hexInput(self,hex,color)
+			hex.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 and isMouseInHexagon(hex) then
+					self.OnSelect:Fire(color) self:Close()
+				end
+			end)
+			hex.InputChanged:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseMovement and isMouseInHexagon(hex) then
+					self.OnPreview:Fire(color)
+				end
+			end)
+		end
+
+		local function createGui(self)
+			local gui = Instance.new("ScreenGui")
+			gui.Name = "BrickColor"
+			local frame = Instance.new("Frame", gui)
+			frame.Active = true
+			frame.BackgroundColor3 = Color3.new(0.17647059261799,0.17647059261799,0.17647059261799)
+			frame.BorderColor3 = Color3.new(0.1294117718935,0.1294117718935,0.1294117718935)
+			frame.Position = UDim2.new(0.40000000596046,0,0.40000000596046,0)
+			frame.Size = UDim2.new(0,337,0,380)
+			local moreColors = Instance.new("TextButton", frame)
+			moreColors.Name = "MoreColors"
+			moreColors.BackgroundColor3 = Color3.new(0.2352941185236,0.2352941185236,0.2352941185236)
+			moreColors.BorderColor3 = Color3.new(0.21568627655506,0.21568627655506,0.21568627655506)
+			moreColors.BorderSizePixel = 0 moreColors.Font = 3
+			moreColors.Position = UDim2.new(0,5,1,-30) moreColors.Size = UDim2.new(1,-10,0,25)
+			moreColors.Text = "More Colors" moreColors.TextColor3 = Color3.new(1,1,1) moreColors.TextSize = 14
+			local hexTemplate = Instance.new("ImageLabel", frame)
+			hexTemplate.Name = "Hex" hexTemplate.Visible = false
+			hexTemplate.BackgroundColor3 = Color3.new(1,1,1)
+			hexTemplate.BackgroundTransparency = 1
+			hexTemplate.BorderSizePixel = 0
+			hexTemplate.Image = "rbxassetid://1281023007"
+			hexTemplate.ImageColor3 = Color3.new(0.33333334326744,0.33333334326744,0.49803924560547)
+			hexTemplate.Size = UDim2.new(0,35,0,35)
+
+			local pCount = 0
+			for row = 1,13 do
+				local columns = math.min(row,14-row)+6
+				for column = 1,columns do
+					local nextColor = BrickColor.palette(pCount).Color
+					local newHex = hexTemplate:Clone()
+					newHex.Position = UDim2.new(0,(column-1)*25-(columns-7)*13+3*26+1,0,(row-1)*23+4)
+					newHex.ImageColor3 = nextColor newHex.Visible = true
+					hexInput(self,newHex,nextColor) newHex.Parent = frame
+					pCount = pCount + 1
+				end
+			end
+			for column = 1,12 do
+				local nextColor = bottomColors[column]
+				local newHex = hexTemplate:Clone()
+				newHex.Position = UDim2.new(0,(column-1)*25-(12-7)*13+3*26+3,0,308)
+				newHex.ImageColor3 = nextColor newHex.Visible = true
+				hexInput(self,newHex,nextColor) newHex.Parent = frame
+			end
+			moreColors.MouseButton1Click:Connect(function() self.OnMoreColors:Fire() self:Close() end)
+			self.Gui = gui self.GuiElems = {Frame = frame, MoreColors = moreColors}
+		end
+
+		funcs.SetMoreColorsVisible = function(self,vis)
+			local frame = self.GuiElems.Frame
+			frame.Size = UDim2.new(0,337,0,380-(not vis and 33 or 0))
+			self.GuiElems.MoreColors.Visible = vis
+		end
+
+		funcs.Show = function(self,x,y,prevColor)
+			self.PrevColor = prevColor or self.PrevColor
+			local x,y = x or mouse.X, y or mouse.Y
+			local maxX,maxY = mouse.ViewSizeX,mouse.ViewSizeY
+			Lib.ShowGui(self.Gui)
+			local sizeX,sizeY = self.GuiElems.Frame.AbsoluteSize.X,self.GuiElems.Frame.AbsoluteSize.Y
+			if x + sizeX > maxX then x = self.ReverseX and x - sizeX or maxX - sizeX end
+			local reverseY = false
+			if y + sizeY > maxY then reverseY = true end
+			local closable = false
+			if self.CloseEvent then self.CloseEvent:Disconnect() end
+			self.CloseEvent = service.UserInputService.InputBegan:Connect(function(input)
+				if not closable or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				if not Lib.CheckMouseInGui(self.GuiElems.Frame) then self.CloseEvent:Disconnect() self:Close() end
+			end)
+			if reverseY then
+				local newY = y - sizeY - (self.ReverseYOffset or 0)
+				y = newY >= 0 and newY or 0
+			end
+			self.GuiElems.Frame.Position = UDim2.new(0,x,0,y)
+			Lib.FastWait() closable = true
+		end
+
+		funcs.Close = function(self) self.Gui.Parent = nil self.OnCancel:Fire() end
+
+		local mt = {__index = funcs}
+		local function new()
+			local obj = setmetatable({
+				OnPreview = Lib.Signal.new(), OnSelect = Lib.Signal.new(),
+				OnCancel = Lib.Signal.new(), OnMoreColors = Lib.Signal.new(),
+				PrevColor = Color3.new(0,0,0)
+			},mt)
+			createGui(obj)
+			return obj
+		end
+		return {new = new}
+	end)()
+
+	Lib.ColorPicker = (function()
+		local funcs = {}
+		local function new()
+			local newMt = setmetatable({},{})
+			newMt.OnSelect = Lib.Signal.new()
+			newMt.OnCancel = Lib.Signal.new()
+			newMt.OnPreview = Lib.Signal.new()
+
+			local window = Lib.Window.new()
+			window.Resizable = false window.Alignable = false
+			window:SetTitle("Color Picker") window:Resize(450,330)
+			newMt.Window = window newMt.Gui = window.Gui
+
+			local content = window.GuiElems.Content
+
+			-- Color space
+			local colorSpaceFrame = createSimple("Frame",{BackgroundColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),BorderSizePixel=0,ClipsDescendants=true,Name="ColorSpaceFrame",Parent=content,Position=UDim2.new(1,-261,0,4),Size=UDim2.new(0,222,0,202)})
+			local colorSpace = createSimple("ImageLabel",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Image="rbxassetid://1072518406",Name="ColorSpace",Parent=colorSpaceFrame,Position=UDim2.new(0,1,0,1),Size=UDim2.new(0,220,0,200)})
+			local colorScope = createSimple("Frame",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,BorderSizePixel=0,Name="Scope",Parent=colorSpace,Position=UDim2.new(0,210,0,190),Size=UDim2.new(0,20,0,20)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Name="Line",Parent=colorScope,Position=UDim2.new(0,9,0,0),Size=UDim2.new(0,2,0,20)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Name="Line",Parent=colorScope,Position=UDim2.new(0,0,0,9),Size=UDim2.new(0,20,0,2)})
+
+			-- Color strip
+			local colorStrip = createSimple("ImageLabel",{BackgroundColor3=Color3.new(1,1,1),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Image="rbxassetid://1072518502",Name="ColorStrip",Parent=content,Position=UDim2.new(1,-30,0,5),Size=UDim2.new(0,13,0,200)})
+			local arrowFrame = createSimple("Frame",{BackgroundColor3=Color3.new(0.3137255012989,0.3137255012989,0.3137255012989),BackgroundTransparency=1,BorderSizePixel=0,Name="ArrowFrame",Parent=content,Position=UDim2.new(1,-16,0,1),Size=UDim2.new(0,5,0,208)})
+			local colorArrow = createSimple("Frame",{BackgroundTransparency=1,Name="Arrow",Parent=arrowFrame,Position=UDim2.new(0,-2,0,-4),Size=UDim2.new(0,8,0,16)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Parent=colorArrow,Position=UDim2.new(0,2,0,8),Size=UDim2.new(0,1,0,1)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Parent=colorArrow,Position=UDim2.new(0,3,0,7),Size=UDim2.new(0,1,0,3)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Parent=colorArrow,Position=UDim2.new(0,4,0,6),Size=UDim2.new(0,1,0,5)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Parent=colorArrow,Position=UDim2.new(0,5,0,5),Size=UDim2.new(0,1,0,7)})
+			createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Parent=colorArrow,Position=UDim2.new(0,6,0,4),Size=UDim2.new(0,1,0,9)})
+
+			-- Preview
+			local previewFrame = createSimple("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Name="Preview",Parent=content,Position=UDim2.new(1,-260,0,211),Size=UDim2.new(0,35,1,-245)})
+
+			-- RGB inputs
+			local function makeInput(name,title,posY,labelText)
+				local frame = createSimple("Frame",{BackgroundColor3=Color3.new(0.14901961386204,0.14901961386204,0.14901961386204),BorderColor3=Color3.new(0.12549020349979,0.12549020349979,0.12549020349979),Name=name,Parent=content,Position=UDim2.new(1,-63,0,posY),Size=UDim2.new(0,52,0,16)})
+				local input = createSimple("TextBox",{BackgroundColor3=Color3.new(0.25098040699959,0.25098040699959,0.25098040699959),BackgroundTransparency=1,BorderColor3=Color3.new(0.37647062540054,0.37647062540054,0.37647062540054),Font=3,Name="Input",Parent=frame,Position=UDim2.new(0,2,0,0),Size=UDim2.new(0,50,0,16),Text="0",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=0})
+				createSimple("TextLabel",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Font=3,Name="Title",Parent=frame,Position=UDim2.new(0,-40,0,0),Size=UDim2.new(0,34,1,0),Text=labelText,TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=1})
+				return input
+			end
+
+			local redInput   = makeInput("Red",   "Red",   211, "Red:")
+			local greenInput = makeInput("Green", "Green", 233, "Green:")
+			local blueInput  = makeInput("Blue",  "Blue",  255, "Blue:")
+
+			local okButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Font=3,Name="Ok",Parent=content,Position=UDim2.new(1,-210,1,-28),Size=UDim2.new(0,100,0,25),Text="OK",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+			local cancelButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Font=3,Name="Cancel",Parent=content,Position=UDim2.new(1,-105,1,-28),Size=UDim2.new(0,100,0,25),Text="Cancel",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+
+			local user = game:GetService("UserInputService")
+			local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+			local hue,sat,val = 0,0,1
+			local red,green,blue = 1,1,1
+			local chosenColor = Color3.new(0,0,0)
+
+			local function updateColor(noupdate)
+				local relativeX,relativeY = 219-hue*219, 199-sat*199
+				local relativeStripY = 199-val*199
+				local hsvColor = Color3.fromHSV(hue,sat,val)
+				if noupdate == 2 or not noupdate then
+					redInput.Text = tostring(math.floor(255*red))
+					greenInput.Text = tostring(math.floor(255*green))
+					blueInput.Text = tostring(math.floor(255*blue))
+				end
+				chosenColor = Color3.new(red,green,blue)
+				colorScope.Position = UDim2.new(0,relativeX-9,0,relativeY-9)
+				colorStrip.ImageColor3 = Color3.fromHSV(hue,sat,1)
+				colorArrow.Position = UDim2.new(0,-2,0,relativeStripY-4)
+				previewFrame.BackgroundColor3 = chosenColor
+				newMt.Color = chosenColor newMt.OnPreview:Fire(chosenColor)
+			end
+
+			local function colorSpaceInput()
+				local relX = math.clamp(mouse.X-colorSpace.AbsolutePosition.X,0,219)
+				local relY = math.clamp(mouse.Y-colorSpace.AbsolutePosition.Y,0,199)
+				hue = (219-relX)/219 sat = (199-relY)/199
+				local hsvColor = Color3.fromHSV(hue,sat,val)
+				red,green,blue = hsvColor.r,hsvColor.g,hsvColor.b updateColor()
+			end
+
+			local function colorStripInput()
+				local relY = math.clamp(mouse.Y-colorStrip.AbsolutePosition.Y,0,199)
+				val = (199-relY)/199
+				local hsvColor = Color3.fromHSV(hue,sat,val)
+				red,green,blue = hsvColor.r,hsvColor.g,hsvColor.b updateColor()
+			end
+
+			colorSpace.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				local releaseEvent,mouseEvent
+				releaseEvent = user.InputEnded:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+					releaseEvent:Disconnect() mouseEvent:Disconnect()
+				end)
+				mouseEvent = user.InputChanged:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then colorSpaceInput() end
+				end)
+				colorSpaceInput()
+			end)
+
+			colorStrip.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				local releaseEvent,mouseEvent
+				releaseEvent = user.InputEnded:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+					releaseEvent:Disconnect() mouseEvent:Disconnect()
+				end)
+				mouseEvent = user.InputChanged:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then colorStripInput() end
+				end)
+				colorStripInput()
+			end)
+
+			local function updateRed(str) local n=tonumber(str) if n then red=math.clamp(math.floor(n),0,255)/255 local c=Color3.new(red,green,blue) hue,sat,val=Color3.toHSV(c) updateColor(2) end end
+			local function updateGreen(str) local n=tonumber(str) if n then green=math.clamp(math.floor(n),0,255)/255 local c=Color3.new(red,green,blue) hue,sat,val=Color3.toHSV(c) updateColor(2) end end
+			local function updateBlue(str) local n=tonumber(str) if n then blue=math.clamp(math.floor(n),0,255)/255 local c=Color3.new(red,green,blue) hue,sat,val=Color3.toHSV(c) updateColor(2) end end
+
+			redInput.FocusLost:Connect(function() updateRed(redInput.Text) end)
+			greenInput.FocusLost:Connect(function() updateGreen(greenInput.Text) end)
+			blueInput.FocusLost:Connect(function() updateBlue(blueInput.Text) end)
+
+			okButton.MouseButton1Click:Connect(function() newMt.OnSelect:Fire(chosenColor) window:Close() end)
+			cancelButton.MouseButton1Click:Connect(function() newMt.OnCancel:Fire() window:Close() end)
+
+			updateColor()
+
+			newMt.SetColor = function(self,color)
+				red,green,blue = color.r,color.g,color.b
+				hue,sat,val = Color3.toHSV(color)
+				updateColor()
+			end
+			newMt.Show = function(self) self.Window:Show() end
+			return newMt
+		end
+		return {new = new}
+	end)()
+
+	Lib.NumberSequenceEditor = (function()
+		local function new()
+			local newMt = setmetatable({},{})
+			newMt.OnSelect = Lib.Signal.new()
+			newMt.OnCancel = Lib.Signal.new()
+			newMt.OnPreview = Lib.Signal.new()
+
+			local window = Lib.Window.new()
+			window.Resizable = false window:Resize(680,265) window:SetTitle("NumberSequence Editor")
+			newMt.Window = window newMt.Gui = window.Gui
+			local content = window.GuiElems.Content
+
+			local numberLineOutlines = createSimple("Frame",{BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Name="NumberLineOutlines",Parent=content,Position=UDim2.new(0,10,0,20),Size=UDim2.new(1,-20,0,170)})
+			local numberLine = createSimple("Frame",{BackgroundColor3=Color3.new(0.25098040699959,0.25098040699959,0.25098040699959),BackgroundTransparency=1,BorderColor3=Color3.new(0.37647062540054,0.37647062540054,0.37647062540054),Name="NumberLine",Parent=content,Position=UDim2.new(0,10,0,20),Size=UDim2.new(1,-20,0,170)})
+
+			for i = 2,10 do
+				createSimple("Frame",{BackgroundTransparency=0.5,BackgroundColor3=Color3.new(96/255,96/255,96/255),BorderSizePixel=0,Size=UDim2.new(0,1,1,0),Position=UDim2.new((i-1)/(11-1),0,0,0),Parent=numberLineOutlines})
+			end
+			for i = 2,4 do
+				createSimple("Frame",{BackgroundTransparency=0.5,BackgroundColor3=Color3.new(96/255,96/255,96/255),BorderSizePixel=0,Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,(i-1)/(5-1),0),Parent=numberLineOutlines})
+			end
+
+			local timeLabel = createSimple("TextLabel",{BackgroundTransparency=1,Font=3,Parent=content,Position=UDim2.new(0,0,0,210),Size=UDim2.new(0,34,0,20),Text="Time",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=1})
+			local timeFrame = createSimple("Frame",{BackgroundColor3=Color3.new(0.14901961386204,0.14901961386204,0.14901961386204),BorderColor3=Color3.new(0.12549020349979,0.12549020349979,0.12549020349979),Name="Time",Parent=content,Position=UDim2.new(0,40,0,210),Size=UDim2.new(0,60,0,20)})
+			local timeBox = createSimple("TextBox",{BackgroundTransparency=1,Font=3,Name="Input",Parent=timeFrame,Position=UDim2.new(0,2,0,0),Size=UDim2.new(0,58,0,20),Text="0",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=0})
+			local valueLabel = createSimple("TextLabel",{BackgroundTransparency=1,Font=3,Parent=content,Position=UDim2.new(0,130,0,210),Size=UDim2.new(0,34,0,20),Text="Value",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=1})
+			local valueFrame = createSimple("Frame",{BackgroundColor3=Color3.new(0.14901961386204,0.14901961386204,0.14901961386204),BorderColor3=Color3.new(0.12549020349979,0.12549020349979,0.12549020349979),Name="Value",Parent=content,Position=UDim2.new(0,170,0,210),Size=UDim2.new(0,60,0,20)})
+			local valueBox = createSimple("TextBox",{BackgroundTransparency=1,Font=3,Name="Input",Parent=valueFrame,Position=UDim2.new(0,2,0,0),Size=UDim2.new(0,58,0,20),Text="0",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=0})
+			local deleteButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Font=3,Name="Delete",Parent=content,Position=UDim2.new(0,380,0,210),Size=UDim2.new(0,80,0,20),Text="Delete",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+			local resetButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Font=3,Name="Reset",Parent=content,Position=UDim2.new(1,-180,0,210),Size=UDim2.new(0,80,0,20),Text="Reset",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+			local closeButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Font=3,Name="Close",Parent=content,Position=UDim2.new(1,-90,0,210),Size=UDim2.new(0,80,0,20),Text="Close",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+
+			local user = game:GetService("UserInputService")
+			local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+			local points = {}
+			local beginPoint,endPoint,currentlySelected,currentPoint,resetSequence
+
+			local function round(num,places)
+				local multi = 10^places
+				return math.floor(num*multi+0.5)/multi
+			end
+
+			local function updateInputs(point)
+				if not point then return end
+				currentPoint = point
+				local rawT,rawV = point[2],point[1]
+				timeBox.Text = round(rawT,(rawT<0.01 and 5) or (rawT<0.1 and 4) or 3)
+				valueBox.Text = round(rawV,(rawV<0.01 and 5) or (rawV<0.1 and 4) or (rawV<1 and 3) or 2)
+			end
+
+			local function buildSequence()
+				local newPoints = {}
+				table.sort(points,function(a,b) return a[2]<b[2] end)
+				for i,v in pairs(points) do
+					table.insert(newPoints,NumberSequenceKeypoint.new(v[2],v[1],v[3] or 0))
+				end
+				newMt.Sequence = NumberSequence.new(newPoints)
+				newMt.OnSelect:Fire(newMt.Sequence)
+			end
+
+			local function redraw()
+				table.sort(points,function(a,b) return a[2]<b[2] end)
+				local nlSize = numberLine.AbsoluteSize
+				for i,v in pairs(points) do
+					if v[4] then
+						v[4].Position = UDim2.new(0,math.floor((nlSize.X-1)*v[2])-2,0,(nlSize.Y-1)*(10-v[1])/10-2)
+					end
+				end
+			end
+			newMt.Redraw = redraw
+
+			local function placePoint(point)
+				local newPoint = Instance.new("Frame")
+				newPoint.Name = "Point" newPoint.BorderSizePixel = 0
+				newPoint.Size = UDim2.new(0,5,0,5) newPoint.BackgroundColor3 = Color3.new(0,0,0)
+				local nlSize = numberLine.AbsoluteSize
+				newPoint.Position = UDim2.new(0,math.floor((nlSize.X-1)*point[2])-2,0,(nlSize.Y-1)*(10-point[1])/10-2)
+				local sel = Instance.new("Frame",newPoint)
+				sel.Name = "Select" sel.BackgroundTransparency = 1
+				sel.BackgroundColor3 = Color3.new(199/255,44/255,28/255)
+				sel.Position = UDim2.new(0,-2,0,-2) sel.Size = UDim2.new(0,9,0,9)
+				sel.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then
+						for i,v in pairs(points) do if v[4] then v[4].Select.BackgroundTransparency=1 end end
+						sel.BackgroundTransparency = 0 updateInputs(point)
+					end
+					if input.UserInputType == Enum.UserInputType.MouseButton1 and not currentlySelected then
+						currentPoint = point
+						currentlySelected = true
+						sel.BackgroundColor3 = Color3.new(249/255,191/255,59/255)
+						local mouseEvent,releaseEvent
+						releaseEvent = user.InputEnded:Connect(function(input)
+							if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+							mouseEvent:Disconnect() releaseEvent:Disconnect()
+							currentlySelected = nil
+							sel.BackgroundColor3 = Color3.new(199/255,44/255,28/255)
+						end)
+						mouseEvent = user.InputChanged:Connect(function(input)
+							if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+							local maxX = numberLine.AbsoluteSize.X-1
+							local maxY = numberLine.AbsoluteSize.Y-1
+							local relX = math.clamp(mouse.X-numberLine.AbsolutePosition.X,0,maxX)
+							local relY = math.clamp(mouse.Y-numberLine.AbsolutePosition.Y,0,maxY)
+							if point ~= beginPoint and point ~= endPoint then point[2] = relX/maxX end
+							point[1] = 10-(relY/maxY)*10
+							redraw() updateInputs(point)
+							for i,v in pairs(points) do if v[4] then v[4].Select.BackgroundTransparency=1 end end
+							sel.BackgroundTransparency = 0
+							buildSequence()
+						end)
+					end
+				end)
+				newPoint.Parent = numberLine
+				return newPoint
+			end
+
+			local function loadSequence(self,seq)
+				resetSequence = seq
+				for i,v in pairs(points) do if v[4] then v[4]:Destroy() end end
+				points = {}
+				for i,v in pairs(seq.Keypoints) do
+					local maxE = math.min(v.Value,10-v.Value)
+					local np = {v.Value,v.Time,math.min(v.Envelope,maxE)}
+					np[4] = placePoint(np)
+					table.insert(points,np)
+				end
+				beginPoint = points[1] endPoint = points[#points]
+				currentlySelected = nil redraw()
+			end
+			newMt.SetSequence = loadSequence
+
+			numberLine.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 or #points >= 20 then return end
+				for i,v in pairs(points) do if v[4] and Lib.CheckMouseInGui(v[4].Select) then return end end
+				local maxX = numberLine.AbsoluteSize.X-1
+				local maxY = numberLine.AbsoluteSize.Y-1
+				local relX = math.clamp(mouse.X-numberLine.AbsolutePosition.X,0,maxX)
+				local relY = math.clamp(mouse.Y-numberLine.AbsolutePosition.Y,0,maxY)
+				local np = {10-(relY/maxY)*10, relX/maxX, 0}
+				np[4] = placePoint(np)
+				table.insert(points,np)
+				redraw() buildSequence()
+			end)
+
+			timeBox.FocusLost:Connect(function()
+				local n = tonumber(timeBox.Text)
+				if currentPoint and n and currentPoint ~= beginPoint and currentPoint ~= endPoint then
+					currentPoint[2] = math.clamp(n,0,1) redraw() buildSequence() updateInputs(currentPoint)
+				end
+			end)
+
+			valueBox.FocusLost:Connect(function()
+				local n = tonumber(valueBox.Text)
+				if currentPoint and n then
+					currentPoint[1] = math.clamp(n,0,10) redraw() buildSequence() updateInputs(currentPoint)
+				end
+			end)
+
+			deleteButton.MouseButton1Click:Connect(function()
+				if currentPoint and currentPoint ~= beginPoint and currentPoint ~= endPoint then
+					for i,v in pairs(points) do
+						if v == currentPoint then v[4]:Destroy() table.remove(points,i) break end
+					end
+					currentlySelected = nil redraw() buildSequence() updateInputs(points[1])
+				end
+			end)
+
+			resetButton.MouseButton1Click:Connect(function()
+				if resetSequence then newMt:SetSequence(resetSequence) buildSequence() end
+			end)
+
+			closeButton.MouseButton1Click:Connect(function() window:Close() end)
+
+			newMt.Show = function(self) window:Show() end
+			return newMt
+		end
+		return {new = new}
+	end)()
+
+	Lib.ColorSequenceEditor = (function()
+		local function new()
+			local newMt = setmetatable({},{})
+			newMt.OnSelect = Lib.Signal.new()
+			newMt.OnCancel = Lib.Signal.new()
+			newMt.OnPreview = Lib.Signal.new()
+			newMt.OnPickColor = Lib.Signal.new()
+
+			local window = Lib.Window.new()
+			window.Resizable = false window:Resize(650,150) window:SetTitle("ColorSequence Editor")
+			newMt.Window = window newMt.Gui = window.Gui
+			local content = window.GuiElems.Content
+
+			local colorLine = createSimple("Frame",{BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Name="ColorLine",Parent=content,Position=UDim2.new(0,10,0,5),Size=UDim2.new(1,-20,0,70)})
+			local gradient = createSimple("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Name="Gradient",Parent=colorLine,Size=UDim2.new(1,0,1,0)})
+			local gradientUIG = Instance.new("UIGradient",gradient)
+			local arrowFrame = createSimple("Frame",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,BorderSizePixel=0,Name="Arrows",Parent=content,Position=UDim2.new(0,1,0,73),Size=UDim2.new(1,-2,0,16)})
+			local cursor = createSimple("Frame",{BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.5,BorderSizePixel=0,Name="Cursor",Parent=content,Position=UDim2.new(0,10,0,0),Size=UDim2.new(0,1,0,80),Visible=false})
+
+			local timeFrame = createSimple("Frame",{BackgroundColor3=Color3.new(0.14901961386204,0.14901961386204,0.14901961386204),BorderColor3=Color3.new(0.12549020349979,0.12549020349979,0.12549020349979),Name="Time",Parent=content,Position=UDim2.new(0,40,0,95),Size=UDim2.new(0,100,0,20)})
+			local timeBox = createSimple("TextBox",{BackgroundTransparency=1,Font=3,Name="Input",Parent=timeFrame,Position=UDim2.new(0,2,0,0),Size=UDim2.new(0,98,0,20),Text="0",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14,TextXAlignment=0})
+			local colorBox = createSimple("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderColor3=Color3.new(0.21568627655506,0.21568627655506,0.21568627655506),Name="ColorBox",Parent=content,Position=UDim2.new(0,220,0,95),Size=UDim2.new(0,20,0,20)})
+			local deleteButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderSizePixel=0,Font=3,Name="Delete",Parent=content,Position=UDim2.new(0,280,0,95),Size=UDim2.new(0,80,0,20),Text="Delete",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+			local resetButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderSizePixel=0,Font=3,Name="Reset",Parent=content,Position=UDim2.new(1,-180,0,95),Size=UDim2.new(0,80,0,20),Text="Reset",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+			local closeButton = createSimple("TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2352941185236,0.2352941185236,0.2352941185236),BorderSizePixel=0,Font=3,Name="Close",Parent=content,Position=UDim2.new(1,-90,0,95),Size=UDim2.new(0,80,0,20),Text="Close",TextColor3=Color3.new(0.86274516582489,0.86274516582489,0.86274516582489),TextSize=14})
+
+			local user = game:GetService("UserInputService")
+			local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+			local colors = {} local currentlySelected,currentPoint,resetSequence
+			local beginPoint,endPoint
+
+			local arrow = createSimple("Frame",{BackgroundTransparency=1,Name="Arrow",Parent=content,Size=UDim2.new(0,16,0,16),Visible=false})
+			for i,data in ipairs({{UDim2.new(0,8,0,3),UDim2.new(0,1,0,2)},{UDim2.new(0,7,0,5),UDim2.new(0,3,0,2)},{UDim2.new(0,6,0,7),UDim2.new(0,5,0,2)},{UDim2.new(0,5,0,9),UDim2.new(0,7,0,2)},{UDim2.new(0,4,0,11),UDim2.new(0,9,0,2)}}) do
+				local f = createSimple("Frame",{BackgroundColor3=Color3.new(0.86274510622025,0.86274510622025,0.86274510622025),BorderSizePixel=0,Parent=arrow,Position=data[1],Size=data[2]})
+			end
+
+			newMt.Sequence = ColorSequence.new(Color3.new(1,1,1))
+
+			local function buildSequence(noupdate)
+				local newPoints = {}
+				table.sort(colors,function(a,b) return a[2]<b[2] end)
+				for i,v in pairs(colors) do table.insert(newPoints,ColorSequenceKeypoint.new(v[2],v[1])) end
+				newMt.Sequence = ColorSequence.new(newPoints)
+				gradientUIG.Color = newMt.Sequence
+				if not noupdate then newMt.OnSelect:Fire(newMt.Sequence) end
+			end
+
+			local function updateInputs(point)
+				if not point then return end
+				currentPoint = point
+				local raw = point[2]
+				local places = (raw<0.01 and 5) or (raw<0.1 and 4) or 3
+				timeBox.Text = tostring(math.floor(raw*10^places+0.5)/10^places)
+				colorBox.BackgroundColor3 = point[1]
+			end
+
+			local function placeArrow(ind,point)
+				local newArrow = arrow:Clone()
+				newArrow.Position = UDim2.new(0,math.floor((colorLine.AbsoluteSize.X-1)*ind)+1,0,0)
+				newArrow.Visible = true newArrow.Parent = arrowFrame
+
+				newArrow.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then
+						cursor.Visible = true cursor.Position = UDim2.new(0,9+newArrow.Position.X.Offset,0,0)
+					end
+					if input.UserInputType == Enum.UserInputType.MouseButton1 then
+						updateInputs(point)
+						if point == beginPoint or point == endPoint or currentlySelected then return end
+						currentlySelected = true
+						local releaseEvent,mouseEvent
+						releaseEvent = user.InputEnded:Connect(function(input)
+							if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+							mouseEvent:Disconnect() releaseEvent:Disconnect()
+							currentlySelected = nil cursor.Visible = false
+						end)
+						mouseEvent = user.InputChanged:Connect(function(input)
+							if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+							local maxSize = colorLine.AbsoluteSize.X-1
+							local relX = math.clamp(mouse.X-colorLine.AbsolutePosition.X,0,maxSize)
+							point[2] = relX/maxSize
+							updateInputs(point)
+							newArrow.Position = UDim2.new(0,relX+1,0,0)
+							cursor.Visible = true cursor.Position = UDim2.new(0,9+newArrow.Position.X.Offset,0,0)
+							buildSequence()
+						end)
+					end
+				end)
+				newArrow.InputEnded:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then cursor.Visible = false end
+				end)
+				return newArrow
+			end
+
+			local function loadSequence(self,seq)
+				resetSequence = seq
+				for i,v in pairs(colors) do if v[3] then v[3]:Destroy() end end
+				colors = {} currentlySelected = nil
+				for i,v in pairs(seq.Keypoints) do
+					local np = {v.Value,v.Time}
+					np[3] = placeArrow(v.Time,np)
+					table.insert(colors,np)
+				end
+				beginPoint = colors[1] endPoint = colors[#colors]
+				updateInputs(colors[1]) buildSequence(true)
+			end
+			newMt.SetSequence = loadSequence
+
+			colorLine.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 or #colors >= 20 then return end
+				local maxSize = colorLine.AbsoluteSize.X-1
+				local relX = math.clamp(mouse.X-colorLine.AbsolutePosition.X,0,maxSize)
+				local raw = relX/maxSize
+				local fromColor,toColor
+				for i,col in pairs(colors) do
+					if col[2] >= raw then fromColor = colors[math.max(i-1,1)] toColor = colors[i] break end
+				end
+				local lerpColor = fromColor[1]:lerp(toColor[1],(raw-fromColor[2])/(toColor[2]-fromColor[2]))
+				local np = {lerpColor,raw}
+				np[3] = placeArrow(raw,np)
+				table.insert(colors,np)
+				updateInputs(np) buildSequence()
+			end)
+
+			colorLine.InputChanged:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+				local maxSize = colorLine.AbsoluteSize.X-1
+				local relX = math.clamp(mouse.X-colorLine.AbsolutePosition.X,0,maxSize)
+				cursor.Visible = true cursor.Position = UDim2.new(0,10+relX,0,0)
+			end)
+			colorLine.InputEnded:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+				cursor.Visible = false
+			end)
+
+			timeBox:GetPropertyChangedSignal("Text"):Connect(function()
+				local n = tonumber(timeBox.Text)
+				if currentPoint and n and currentPoint ~= beginPoint and currentPoint ~= endPoint then
+					currentPoint[2] = math.clamp(n,0,1) buildSequence()
+					if currentPoint[3] then currentPoint[3].Position = UDim2.new(0,math.floor((colorLine.AbsoluteSize.X-1)*currentPoint[2])+1,0,0) end
+				end
+			end)
+
+			colorBox.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				local editor = newMt.ColorPicker
+				if not editor then
+					editor = Lib.ColorPicker.new()
+					editor.Window:SetTitle("ColorSequence Color Picker")
+					editor.OnSelect:Connect(function(col)
+						if currentPoint then currentPoint[1] = col colorBox.BackgroundColor3 = col end
+						buildSequence()
+					end)
+					newMt.ColorPicker = editor
+				end
+				editor.Window:ShowAndFocus()
+			end)
+
+			deleteButton.MouseButton1Click:Connect(function()
+				if currentPoint and currentPoint ~= beginPoint and currentPoint ~= endPoint then
+					for i,v in pairs(colors) do
+						if v == currentPoint then v[3]:Destroy() table.remove(colors,i) break end
+					end
+					currentlySelected = nil updateInputs(colors[1]) buildSequence()
+				end
+			end)
+
+			resetButton.MouseButton1Click:Connect(function()
+				if resetSequence then newMt:SetSequence(resetSequence) end
+			end)
+
+			closeButton.MouseButton1Click:Connect(function() window:Close() end)
+
+			newMt.Show = function(self) window:Show() end
+			return newMt
+		end
+		return {new = new}
+	end)()
+
+	Lib.CodeFrame = (function()
+		local funcs = {}
+
+		local typeMap = {
+			[1]="String",[2]="String",[3]="String",[4]="Comment",[5]="Operator",
+			[6]="Number",[7]="Keyword",[8]="BuiltIn",[9]="LocalMethod",[10]="LocalProperty",
+			[11]="Nil",[12]="Bool",[13]="Function",[14]="Local",[15]="Self",
+			[16]="FunctionName",[17]="Bracket"
+		}
+
+		local keywords = {
+			["and"]=true,["break"]=true,["do"]=true,["else"]=true,["elseif"]=true,
+			["end"]=true,["false"]=true,["for"]=true,["function"]=true,["if"]=true,
+			["in"]=true,["local"]=true,["nil"]=true,["not"]=true,["or"]=true,
+			["repeat"]=true,["return"]=true,["then"]=true,["true"]=true,["until"]=true,
+			["while"]=true,["plugin"]=true
+		}
+
+		local specialKeywordsTypes = {
+			["nil"]=11,["true"]=12,["false"]=12,["function"]=13,["local"]=14,["self"]=15
+		}
+
+		local builtIns = {
+			["delay"]=true,["elapsedTime"]=true,["require"]=true,["spawn"]=true,
+			["tick"]=true,["time"]=true,["typeof"]=true,["UserSettings"]=true,
+			["wait"]=true,["warn"]=true,["game"]=true,["shared"]=true,
+			["script"]=true,["workspace"]=true,["assert"]=true,["collectgarbage"]=true,
+			["error"]=true,["getfenv"]=true,["getmetatable"]=true,["ipairs"]=true,
+			["loadstring"]=true,["newproxy"]=true,["next"]=true,["pairs"]=true,
+			["pcall"]=true,["print"]=true,["rawequal"]=true,["rawget"]=true,
+			["rawset"]=true,["select"]=true,["setfenv"]=true,["setmetatable"]=true,
+			["tonumber"]=true,["tostring"]=true,["type"]=true,["unpack"]=true,
+			["xpcall"]=true,["_G"]=true,["_VERSION"]=true,["coroutine"]=true,
+			["debug"]=true,["math"]=true,["os"]=true,["string"]=true,["table"]=true,
+			["bit32"]=true,["utf8"]=true,["Axes"]=true,["BrickColor"]=true,
+			["CFrame"]=true,["Color3"]=true,["ColorSequence"]=true,
+			["ColorSequenceKeypoint"]=true,["Enum"]=true,["Faces"]=true,
+			["Instance"]=true,["NumberRange"]=true,["NumberSequence"]=true,
+			["NumberSequenceKeypoint"]=true,["PhysicalProperties"]=true,["Random"]=true,
+			["Ray"]=true,["Rect"]=true,["Region3"]=true,["TweenInfo"]=true,
+			["UDim"]=true,["UDim2"]=true,["Vector2"]=true,["Vector3"]=true,
+		}
+
+		local richReplace = {["'"]="&apos;",["\""]="&quot;",["<"]="&lt;",[">"]="&gt;",["&"]="&amp;"}
+
+		local function makeFrame(obj)
+			local frame = createSimple("Frame",{BackgroundColor3=Color3.new(0.15686275064945,0.15686275064945,0.15686275064945),BorderSizePixel=0,Position=UDim2.new(0.5,-300,0.5,-200),Size=UDim2.new(0,600,0,400)})
+			local linesFrame = createSimple("Frame",{BackgroundTransparency=1,ClipsDescendants=true,Name="Lines",Parent=frame,Size=UDim2.new(1,0,1,0)})
+			local lineNumbers = createSimple("TextLabel",{BackgroundTransparency=1,Font=Enum.Font.Code,Name="LineNumbers",Parent=frame,RichText=true,TextXAlignment=Enum.TextXAlignment.Right,TextYAlignment=Enum.TextYAlignment.Top,ClipsDescendants=true})
+
+			local scrollV = Lib.ScrollBar.new()
+			local scrollH = Lib.ScrollBar.new(true)
+			scrollH.Gui.Position = UDim2.new(0,0,1,-16)
+			scrollV.WheelIncrement = 3 scrollH.Increment = 2 scrollH.WheelIncrement = 7
+			scrollV.Gui.Parent = frame scrollH.Gui.Parent = frame
+
+			obj.Frame = frame obj.Gui = frame
+			obj.GuiElems = {LinesFrame=linesFrame, LineNumbersLabel=lineNumbers, ScrollCorner=createSimple("Frame",{BackgroundColor3=Color3.new(0.15686275064945,0.15686275064945,0.15686275064945),BorderSizePixel=0,Name="ScrollCorner",Position=UDim2.new(1,-16,1,-16),Size=UDim2.new(0,16,0,16),Visible=false,Parent=frame})}
+			obj.ScrollV = scrollV obj.ScrollH = scrollH
+
+			scrollV.Scrolled:Connect(function() obj.ViewY=scrollV.Index obj:Refresh() end)
+			scrollH.Scrolled:Connect(function() obj.ViewX=scrollH.Index obj:Refresh() end)
+
+			linesFrame.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					obj:SetEditing(true)
+				end
+			end)
+
+			scrollV:SetScrollFrame(linesFrame)
+			frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() obj:UpdateView() obj:Refresh() end)
+			return frame
+		end
+
+		funcs.MapNewLines = function(self)
+			local newLines = {} local count = 1
+			local find = string.find local init = 1
+			local pos = find(self.Text,"\n",init,true)
+			while pos do
+				newLines[count] = pos count = count + 1
+				init = pos + 1 pos = find(self.Text,"\n",init,true)
+			end
+			self.NewLines = newLines
+		end
+
+		funcs.HighlightLine = function(self,line)
+			local cached = self.ColoredLines[line]
+			if cached then return cached end
+			local sub = string.sub local find = string.find local match = string.match
+			local highlights = {}
+			local lineText = self.Lines[line] or ""
+			local lastEnding = 0 local currentType = 0
+
+			for col = 1,#lineText do
+				if col <= lastEnding then highlights[col]=currentType continue end
+				local char = sub(lineText,col,col)
+				if find(char,"[%a_]") then
+					local word = match(lineText,"[%a%d_]+",col)
+					local wordType = (keywords[word] and 7) or (builtIns[word] and 8)
+					lastEnding = col+#word-1
+					if wordType == 7 then wordType = specialKeywordsTypes[word] or wordType end
+					currentType = wordType or 0
+					highlights[col] = currentType
+				elseif find(char,"%p") then
+					highlights[col] = 5
+					if char == "-" and sub(lineText,col+1,col+1) == "-" then
+						currentType = 4 lastEnding = #lineText
+						for i=col,#lineText do highlights[i]=4 end
+					elseif char == '"' or char == "'" then
+						local endQ = find(lineText,char,col+1,true)
+						while endQ and sub(lineText,endQ-1,endQ-1)== "\\" do endQ = find(lineText,char,endQ+1,true) end
+						if endQ then lastEnding = endQ else lastEnding = #lineText end
+						currentType = 1
+						for i=col,lastEnding do highlights[i]=1 end
+					end
+				elseif find(char,"%d") then
+					local _,endPos = find(lineText,"%x+%.?%d*",col)
+					currentType = 6 lastEnding = endPos or col
+					highlights[col] = 6
+				else
+					highlights[col] = currentType
+				end
+			end
+
+			self.ColoredLines[line] = highlights
+			return highlights
+		end
+
+		funcs.MakeRichTemplates = function(self)
+			local floor = math.floor
+			local templates = {}
+			for name,color in pairs(self.Colors) do
+				templates[name] = ('<font color="rgb(%s,%s,%s)">'):format(floor(color.r*255),floor(color.g*255),floor(color.b*255))
+			end
+			self.RichTemplates = templates
+		end
+
+		funcs.ApplyTheme = function(self)
+			local colors = Settings.Theme.Syntax
+			self.Colors = colors
+			if self.GuiElems and self.GuiElems.LineNumbersLabel then
+				self.GuiElems.LineNumbersLabel.TextColor3 = colors.Text
+			end
+			if self.Frame then self.Frame.BackgroundColor3 = colors.Background end
+			self:MakeRichTemplates()
+		end
+
+		funcs.Refresh = function(self)
+			local linesFrame = self.GuiElems.LinesFrame
+			if not linesFrame then return end
+			local vSize = linesFrame.AbsoluteSize.Y
+			local hSize = linesFrame.AbsoluteSize.X
+			local maxLines = math.max(math.ceil(vSize / self.FontSize),0)
+			local viewX,viewY = self.ViewX,self.ViewY
+			local gsub = string.gsub local sub = string.sub
+
+			local lineNumberStr = ""
+			for row = 1,maxLines do
+				local lineFrame = self.LineFrames[row]
+				if not lineFrame then
+					lineFrame = createSimple("Frame",{BackgroundTransparency=1,BorderSizePixel=0,Name="Line",Parent=linesFrame,Position=UDim2.new(0,0,0,(row-1)*self.FontSize),Size=UDim2.new(1,0,0,self.FontSize)})
+					local label = createSimple("TextLabel",{BackgroundTransparency=1,Font=Enum.Font.Code,Name="Label",Parent=lineFrame,RichText=true,Size=UDim2.new(1,0,1,0),TextColor3=self.Colors.Text,TextSize=self.FontSize,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,ZIndex=2})
+					self.LineFrames[row] = lineFrame
+				end
+
+				local relaY = viewY + row
+				local lineText = self.Lines[relaY] or ""
+				local resText = "" local colStart = viewX+1
+				local highlights = self:HighlightLine(relaY)
+				local richTemplates = self.RichTemplates
+				local textTemplate = richTemplates.Text or ""
+				local curType = highlights[colStart]
+				local curTemplate = richTemplates[typeMap[curType]] or textTemplate
+
+				local maxCols = math.ceil(hSize / math.ceil(self.FontSize/2)) + 1
+				for col = 2,maxCols do
+					local relaX = viewX + col
+					local posType = highlights[relaX]
+					if posType ~= curType then
+						local template = richTemplates[typeMap[posType]] or textTemplate
+						if template ~= curTemplate then
+							local nextText = gsub(sub(lineText,colStart,relaX-1),"['\"<>&]",richReplace)
+							resText = resText..(curTemplate ~= textTemplate and (curTemplate..nextText.."</font>") or nextText)
+							colStart = relaX curTemplate = template
+						end
+						curType = posType
+					end
+				end
+				local lastText = gsub(sub(lineText,colStart,viewX+maxCols),"['\"<>&]",richReplace)
+				if #lastText > 0 then
+					resText = resText..(curTemplate ~= textTemplate and (curTemplate..lastText.."</font>") or lastText)
+				end
+
+				if self.Lines[relaY] then
+					lineNumberStr = lineNumberStr..relaY.."\n"
+				end
+				lineFrame.Label.Text = resText
+				lineFrame.Visible = true
+			end
+
+			for i = maxLines+1,#self.LineFrames do
+				self.LineFrames[i]:Destroy() self.LineFrames[i] = nil
+			end
+
+			if self.GuiElems.LineNumbersLabel then
+				self.GuiElems.LineNumbersLabel.Text = lineNumberStr
+			end
+		end
+
+		funcs.UpdateView = function(self)
+			local totalLinesStr = tostring(#self.Lines)
+			local fontWidth = math.ceil(self.FontSize/2)
+			local linesOffset = #totalLinesStr*fontWidth + 4*fontWidth
+			local linesFrame = self.GuiElems.LinesFrame
+			if not linesFrame then return end
+			local hSize = linesFrame.AbsoluteSize.X
+			local vSize = linesFrame.AbsoluteSize.Y
+			local maxLines = math.ceil(vSize/self.FontSize)
+			local scrollV = self.ScrollV local scrollH = self.ScrollH
+
+			scrollV.VisibleSpace = maxLines scrollV.TotalSpace = #self.Lines+1
+			scrollH.VisibleSpace = math.ceil(hSize/fontWidth) scrollH.TotalSpace = self.MaxTextCols+1
+			scrollV.Gui.Visible = #self.Lines+1 > maxLines
+			scrollH.Gui.Visible = self.MaxTextCols*fontWidth > hSize
+
+			local oldOffsets = self.FrameOffsets
+			self.FrameOffsets = Vector2.new(scrollV.Gui.Visible and -16 or 0,scrollH.Gui.Visible and -16 or 0)
+			if oldOffsets ~= self.FrameOffsets then self:UpdateView() return end
+
+			scrollV:ScrollTo(self.ViewY,true) scrollH:ScrollTo(self.ViewX,true)
+			self.ViewY = scrollV.Index self.ViewX = scrollH.Index
+
+			if self.GuiElems.LineNumbersLabel then
+				self.GuiElems.LineNumbersLabel.Position = UDim2.new(0,fontWidth,0,0)
+				self.GuiElems.LineNumbersLabel.Size = UDim2.new(0,#totalLinesStr*fontWidth,1,oldOffsets.Y)
+				self.GuiElems.LineNumbersLabel.TextSize = self.FontSize
+			end
+			if linesFrame then
+				linesFrame.Position = UDim2.new(0,linesOffset,0,0)
+				linesFrame.Size = UDim2.new(1,-linesOffset+oldOffsets.X,1,oldOffsets.Y)
+			end
+		end
+
+		funcs.ProcessTextChange = function(self)
+			local maxCols = 0
+			local lines = self.Lines
+			for i = 1,#lines do
+				local lineLen = #lines[i]
+				if lineLen > maxCols then maxCols = lineLen end
+			end
+			self.MaxTextCols = maxCols
+			self.Text = table.concat(self.Lines,"\n")
+			self:MapNewLines()
+			table.clear(self.ColoredLines)
+			self:UpdateView()
+			self:Refresh()
+		end
+
+		funcs.SetText = function(self,txt)
+			local lines = self.Lines
+			table.clear(lines)
+			local count = 1
+			txt = txt:gsub("\r\n","\n"):gsub("\r","\n")
+			for line in (txt.."\n"):gmatch("([^\n]*)\n") do
+				lines[count] = line count = count + 1
+			end
+			self:ProcessTextChange()
+		end
+
+		funcs.GetText = function(self)
+			return table.concat(self.Lines,"\n")
+		end
+
+		funcs.SetEditing = function(self,on) end
+
+		local mt = {__index = funcs}
+		local function new()
+			local scrollV = Lib.ScrollBar.new()
+			local scrollH = Lib.ScrollBar.new(true)
+			local obj = setmetatable({
+				FontSize=15,ViewX=0,ViewY=0,
+				Colors=Settings.Theme.Syntax,
+				ColoredLines={},Lines={""},LineFrames={},
+				Text="",NewLines={},MaxTextCols=0,
+				FrameOffsets=Vector2.new(0,0),
+				ScrollV=scrollV,ScrollH=scrollH,
+				RichTemplates={}
+			},mt)
+			makeFrame(obj)
+			obj:MakeRichTemplates()
+			obj:ApplyTheme()
+			obj:UpdateView()
+			return obj
+		end
+		return {new = new}
+	end)()
+
+
 	return Lib
 end
 

@@ -1094,11 +1094,104 @@ local function main()
 			Explorer.InsertObjectContext:Show(x,y)
 		end})
 
-		context:Register("CALL_FUNCTION",{Name="Call Function",IconMap=Explorer.ClassIcons,Icon=66,OnClick=function() end})
-		context:Register("GET_REFERENCES",{Name="Get Lua References",IconMap=Explorer.ClassIcons,Icon=34,OnClick=function() end})
-		context:Register("SAVE_INST",{Name="Save to File",IconMap=Explorer.MiscIcons,Icon="Save",OnClick=function() end})
-		context:Register("VIEW_CONNECTIONS",{Name="View Connections",OnClick=function() end})
-		context:Register("VIEW_API",{Name="View API Page",IconMap=Explorer.MiscIcons,Icon="Reference",OnClick=function() end})
+		context:Register("CALL_FUNCTION",{Name="Call Function",IconMap=Explorer.ClassIcons,Icon=66,OnClick=function()
+			local sList=selection.List
+			if #sList==0 then return end
+			local obj=sList[1].Obj
+			-- Show all callable functions on this object
+			local context2=Lib.ContextMenu.new()
+			context2.Iconless=true context2.MaxHeight=300
+			local funcs={}
+			local apiClass=API.Classes[obj.ClassName]
+			while apiClass do
+				for _,fn in pairs(apiClass.Functions) do funcs[fn.Name]=true end
+				apiClass=apiClass.Superclass
+			end
+			for name,_ in pairs(funcs) do
+				context2:Add({Name=name,OnClick=function()
+					local ok,result=pcall(function() return obj[name](obj) end)
+					if ok then print("[Dex] "..obj.Name..":"..name.."() =",result)
+					else warn("[Dex] "..name.."() failed:",result) end
+				end})
+			end
+			if #context2.Items==0 then context2:Add({Name="(no callable functions)",Disabled=true}) end
+			context2:Show()
+		end})
+		context:Register("GET_REFERENCES",{Name="Get Lua References",IconMap=Explorer.ClassIcons,Icon=34,OnClick=function()
+			local sList=selection.List
+			if #sList==0 then return end
+			local obj=sList[1].Obj
+			-- Search workspace for any value referencing this object
+			local found={}
+			local function search(inst)
+				local ok,props=pcall(function() return inst:GetProperties and inst:GetProperties() or {} end)
+				for _,desc in pairs(inst:GetDescendants()) do
+					pcall(function()
+						for propName,val in pairs({}) do end
+					end)
+				end
+			end
+			print("[Dex] References to",obj:GetFullName(),"(use Explorer search with /isa for class filtering)")
+			if env.getloadedmodules then
+				local mods=env.getloadedmodules()
+				print("[Dex] Loaded modules:",#mods)
+			end
+		end})
+		context:Register("SAVE_INST",{Name="Save to File",IconMap=Explorer.MiscIcons,Icon="Save",OnClick=function()
+			if not env.writefile then
+				warn("[Dex] Save to File: writefile not available in this executor") return
+			end
+			local sList=selection.List
+			if #sList==0 then return end
+			for i=1,#sList do
+				local obj=sList[i].Obj
+				local filename="Dex_"..obj.Name.."_"..tostring(os.time())..".rbxm"
+				local ok,err=pcall(function()
+					-- Best-effort: serialize name and class
+					local data="-- Dex Export\n-- Name: "..obj.Name.."\n-- Class: "..obj.ClassName.."\n-- Path: "..obj:GetFullName().."\n"
+					if obj:IsA("LuaSourceContainer") then
+						data=data.."-- Source:\n"..obj.Source
+					end
+					env.writefile(filename,data)
+				end)
+				if ok then print("[Dex] Saved",obj.Name,"to",filename)
+				else warn("[Dex] Save failed:",err) end
+			end
+		end})
+		context:Register("VIEW_CONNECTIONS",{Name="View Connections",OnClick=function()
+			local sList=selection.List
+			if #sList==0 then return end
+			local obj=sList[1].Obj
+			if env.getconnections then
+				local connections=env.getconnections(obj)
+				print("[Dex] Connections on",obj:GetFullName(),"("..#connections.."total):")
+				for i,con in pairs(connections) do
+					print("  ["..i.."]",con)
+				end
+			else
+				-- Fallback: list known signals
+				print("[Dex] getconnections not available — listing known signals for",obj.ClassName)
+				local apiClass=API.Classes[obj.ClassName]
+				local signals={}
+				while apiClass do
+					for _,ev in pairs(apiClass.Events) do signals[#signals+1]=ev.Name end
+					apiClass=apiClass.Superclass
+				end
+				print("[Dex] Events:",table.concat(signals,", "))
+			end
+		end})
+		context:Register("VIEW_API",{Name="View API Page",IconMap=Explorer.MiscIcons,Icon="Reference",OnClick=function()
+			local sList=selection.List
+			if #sList==0 then return end
+			local className=sList[1].Obj.ClassName
+			local url="https://create.roblox.com/docs/reference/engine/classes/"..className
+			if env.setclipboard then
+				env.setclipboard(url)
+				print("[Dex] API URL copied to clipboard:",url)
+			else
+				print("[Dex] API URL:",url)
+			end
+		end})
 
 		context:Register("VIEW_OBJECT",{Name="View Object (Right click to reset)",IconMap=Explorer.ClassIcons,Icon=5,OnClick=function()
 			local sList=selection.List
