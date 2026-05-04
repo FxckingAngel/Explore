@@ -111,10 +111,13 @@ local function main()
 	local function buildStrategies()
 		return {
 			{
-				name = "decompile()",
+				name = "decompiler.decompile()",
 				fn = function(s)
-					assert(type(decompile) == "function", "not available")
-					return decompile(s)
+					assert(
+						type(decompiler) == "table" and type(decompiler.decompile) == "function",
+						"not available"
+					)
+					return decompiler.decompile(s)
 				end,
 			},
 			{
@@ -125,13 +128,30 @@ local function main()
 				end,
 			},
 			{
-				name = "decompiler.decompile()",
+				name = "getrenv().decompile()",
 				fn = function(s)
-					assert(
-						type(decompiler) == "table" and type(decompiler.decompile) == "function",
-						"not available"
-					)
-					return decompiler.decompile(s)
+					assert(type(getrenv) == "function", "not available")
+					local renv = getrenv()
+					assert(type(renv) == "table" and type(renv.decompile) == "function", "not available")
+					return renv.decompile(s)
+				end,
+			},
+			{
+				name = "decompile()",
+				fn = function(s)
+					assert(type(decompile) == "function", "not available")
+					return decompile(s)
+				end,
+			},
+			{
+				name = "getscriptclosure() + decompile()",
+				fn = function(s)
+					assert(type(getscriptclosure) == "function", "not available")
+					local cl = getscriptclosure(s)
+					assert(type(cl) == "function", "no closure")
+					local dec = decompile or (_G and _G.decompile)
+					assert(type(dec) == "function", "decompile not available")
+					return dec(cl)
 				end,
 			},
 			{
