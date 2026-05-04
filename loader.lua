@@ -650,37 +650,44 @@ local function injectServerBridge()
 		for _, target in pairs(targets) do
 			local targetPath = target:GetFullName()
 			local ok, err = pcall(function()
-				-- Make Source and Disabled writable
+				-- Make Source writable on original
 				setscriptable(target, "Source", true)
-				setscriptable(target, "Disabled", true)
-
-				-- Save original source to restore after injection
 				local originalSource = target.Source
+				local originalParent = target.Parent
 
-				-- Write bridge code
-				target.Source = src
+				-- Clone the script — clone starts fresh, inherits class
+				local clone = target:Clone()
+				setscriptable(clone, "Source", true)
+				setscriptable(clone, "Disabled", true)
 
-				-- Toggle Disabled to force server re-execution
-				target.Disabled = true
-				task.wait(0.05)
-				target.Disabled = false
+				-- Write bridge source to clone
+				clone.Source = src
+				clone.Name = target.Name .. "_DexBridge"
+				clone.Disabled = true
 
-				-- Restore original source after a tick so bridge is running
-				task.delay(1, function()
+				-- Parent clone to same location — Roblox executes it fresh on parent
+				clone.Parent = originalParent
+				clone.Disabled = false  -- trigger execution
+
+				log("Bridge", "Clone parented and enabled at " .. originalParent:GetFullName())
+
+				-- Restore original source of clone after bridge initialises
+				task.delay(2, function()
 					pcall(function()
-						setscriptable(target, "Source", true)
-						target.Source = originalSource
+						setscriptable(clone, "Source", true)
+						clone.Source = originalSource
+						clone.Name = target.Name
 					end)
-					log("Bridge", "Original source restored for " .. targetPath)
+					log("Bridge", "Bridge clone source restored")
 				end)
 			end)
 
 			if ok then
-				log("Bridge", "Method 1 (setscriptable toggle) ✓ via " .. targetPath)
+				log("Bridge", "Method 1 (clone+parent) ✓ via " .. targetPath)
 				injected = true
 				break
 			else
-				warn_tag("Bridge", "Method 1 attempt failed on " .. targetPath .. ": " .. tostring(err))
+				warn_tag("Bridge", "Method 1 failed on " .. targetPath .. ": " .. tostring(err))
 			end
 		end
 	end
