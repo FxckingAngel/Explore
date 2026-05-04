@@ -135,33 +135,29 @@ end
 -- Strategy: detect by FileMesh + high velocity + NOT a player part
 -- We lock onto the FASTEST non-player moving object as the ball
 
+-- In Deathball, the ball is a Sword inside SwordWelds inside a player model.
+-- When it's IN FLIGHT (just hit), it moves at 100-200+ studs/s.
+-- When a player is HOLDING it, velocity is low (~25 studs/s walking speed).
+-- We detect it by: name="Sword", parent.Name="SwordWelds", velocity > 80 studs/s
+-- 80 studs/s threshold: fast enough to be a thrown/hit ball, not someone walking
+
+local BALL_MIN_VELOCITY = 80  -- studs/s — ball in flight is always above this
+
 local function looksLikeBall(obj)
 	if not obj:IsA("BasePart") then return false end
 	if obj.Anchored then return false end
-	if isPlayerPart(obj) then return false end
 
-	-- Must have a FileMesh or be a sphere shape
-	local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
-	local hasMesh = mesh ~= nil
-	local isSphere = (obj:IsA("Part") and obj.Shape == Enum.PartType.Ball)
-		or (mesh and mesh.MeshType == Enum.MeshType.Sphere)
-	local isFileMesh = mesh and mesh.MeshType == Enum.MeshType.FileMesh
+	-- Must be named Sword inside SwordWelds
+	if obj.Name ~= "Sword" then return false end
+	if not obj.Parent or obj.Parent.Name ~= "SwordWelds" then return false end
 
-	if not hasMesh and not isSphere then return false end
-
-	-- Must be moving fast (ball is always in motion when in play)
+	-- Must be moving fast — in flight, not held by a walking player
 	local vel = obj.AssemblyLinearVelocity.Magnitude
-	if vel < 10 then return false end
+	if vel < BALL_MIN_VELOCITY then return false end
 
-	-- Must NOT be a player body part (sword welds are on players too)
-	-- Check: if the top-level ancestor under workspace is a player character, skip
-	local topLevel = obj
-	while topLevel.Parent and topLevel.Parent ~= workspace do
-		topLevel = topLevel.Parent
-	end
-	for _, p in pairs(Players:GetPlayers()) do
-		if p.Character and topLevel == p.Character then return false end
-	end
+	-- Must NOT belong to our own character
+	local c = plr.Character
+	if c and obj:IsDescendantOf(c) then return false end
 
 	return true
 end
