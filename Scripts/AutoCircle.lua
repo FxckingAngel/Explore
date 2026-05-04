@@ -17,7 +17,7 @@ local TweenService     = game:GetService("TweenService")
 local plr = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local RADIUS       = 30     -- your detection ring radius (studs)
+local RADIUS       = 10     -- your detection ring radius (studs)
 local SEGMENTS     = 64     -- ring smoothness
 local BAND         = 6      -- extra tolerance (radius ± studs)
 local COOLDOWN     = 0.2    -- min seconds between triggers on same ball
