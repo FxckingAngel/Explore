@@ -183,18 +183,8 @@ local function update()
 	local toPlayerFlat = Vector3.new(toPlayer.X, 0, toPlayer.Z)
 	local velFlat   = Vector3.new(ballVel.X, 0, ballVel.Z)
 
-	-- Fire when ball is close AND moving toward us
-	local aimedAtUs = false
-	if dist <= MAX_DIST and speed >= MIN_SPEED then
-		if velFlat.Magnitude > 1 and toPlayerFlat.Magnitude > 0 then
-			local dot = velFlat.Unit:Dot(toPlayerFlat.Unit)
-			aimedAtUs = dot >= AIM_DOT
-		end
-		-- If very close, always fire regardless of direction
-		if dist <= 8 then aimedAtUs = true end
-	end
-
-	if aimedAtUs then
+	-- Fire when ball is close enough - no direction check needed
+	if dist <= MAX_DIST then
 		colorRing(myRing, RING_HOT)
 		local now = tick()
 		if now - lastFired >= REFIRE_CD then
@@ -245,7 +235,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v37"
+title.Text="⬤  AUTO-DEFLECT  v38"
 title.Font=Enum.Font.GothamBold title.TextSize=12
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,16)
@@ -334,5 +324,5 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v37 - simplified, no closest check")
+print("[AutoDeflect] v38 - distance only")
 print("[AutoDeflect] Fires when ball aimed at you within 15 studs")
