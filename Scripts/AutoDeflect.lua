@@ -152,23 +152,29 @@ local function pressDeflect()
 	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
+local DEFLECT_CD  = 0.4   -- match game cooldown (seconds)
+local lastDeflect = 0
+
 local function startClicking()
 	if clicking then return end
 	clicking = true
 	deflectBtn = getDeflectButton()
-	print("[AutoDeflect] START btn=" .. tostring(deflectBtn and deflectBtn:GetFullName() or "nil"))
 	task.spawn(function()
 		while clicking and active do
-			pressDeflect()
-			task.wait(0.08)
+			local now = tick()
+			if now - lastDeflect >= DEFLECT_CD then
+				pressDeflect()
+				lastDeflect = now
+			end
+			task.wait(0.05)
 		end
 	end)
 end
 
 local function stopClicking()
 	clicking = false
-	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
+
 
 
 -- ── Main update ───────────────────────────────────────────────────────────────
@@ -251,7 +257,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v25"
+title.Text="⬤  AUTO-HIT  v26"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
