@@ -207,7 +207,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v47"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v48"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
@@ -290,4 +290,4 @@ end
 
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
-print("[AutoDeflect] v47 - no cooldown wait, fire instantly")
+print("[AutoDeflect] v48 - aim mouse at ball then F")
