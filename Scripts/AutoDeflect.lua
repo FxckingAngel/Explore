@@ -29,7 +29,7 @@ local VIM              = game:GetService("VirtualInputManager")
 local plr              = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local RADIUS   = 10
+local RADIUS   = 25
 local SEGMENTS = 64
 local BAND     = 5
 local BALL_MIN_VEL = 15  -- min speed to count as ball in play
@@ -251,7 +251,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v23"
+title.Text="⬤  AUTO-HIT  v24"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
