@@ -106,15 +106,6 @@ local function fireDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- Aim mouse at ball
-	local ball = cachedBall
-	if ball and ball.Parent then
-		local camera = workspace.CurrentCamera
-		local screenPos, onScreen = camera:WorldToScreenPoint(ball.Position)
-		if onScreen then
-			pcall(VIM.SendMouseMoveEvent, VIM, screenPos.X, screenPos.Y, game)
-		end
-	end
 	-- F key
 	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
 	task.wait(0.05)
@@ -217,7 +208,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v50"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v51"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
