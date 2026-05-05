@@ -281,70 +281,7 @@ local function destroyRing(parts)
 end
 
 -- ── Trigger ───────────────────────────────────────────────────────────────────
-local VIM = game:GetService("VirtualInputManager")
-
-local function doHit(ball)
-	if not ball or not ball.Parent then return end
-	local char = plr.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-
-	local speed = ball.AssemblyLinearVelocity.Magnitude
-	if DEBUG then
-		print(("[AutoDeflect] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
-	end
-
-	local cx = workspace.CurrentCamera.ViewportSize.X / 2
-	local cy = workspace.CurrentCamera.ViewportSize.Y / 2
-	-- Spam clicks while ball is in range (game needs multiple inputs to register)
-	task.spawn(function()
-		for i = 1, 5 do
-			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
-			task.wait(0.08)
-			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
-			task.wait(0.1)
-		end
-	end)
-
-	humanState.hitCount    = humanState.hitCount + 1
-	humanState.lastHitTime = tick()
-	humanState.postIgnore  = tick() + HUMAN.PostHitIgnore
-	humanState.fatigue     = math.min(humanState.fatigue + HUMAN.FatiguePerHit, HUMAN.FatigueMax)
-end
-
-local function triggerF(ball)
-	local now = tick()
-	if now - lastTrigger < COOLDOWN then return end
-	if humanState.postIgnore > now then return end
-	lastTrigger = now
-
-	local speed = ball.AssemblyLinearVelocity.Magnitude
-
-	-- Miss check — decreases as ball gets faster
-	local missChance = getMissChance(speed)
-	if math.random() < missChance then
-		if DEBUG then
-			print(("[AutoDeflect] MISS (%.0f%% chance at speed=%.0f)"):format(missChance*100, speed))
-		end
-		return
-	end
-
-	-- Recover fatigue
-	local idleTime = now - humanState.lastHitTime
-	humanState.fatigue = math.max(0, humanState.fatigue - HUMAN.FatigueDecay * idleTime)
-
-	if DEBUG then
-		local reaction = getReactionTime(speed)
-		print(("[AutoDeflect] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
-			speed, reaction*1000, humanState.fatigue*1000, humanState.hitCount))
-	end
-
-	-- FIRE INSTANTLY — ball at 332 studs/s exits a 10-stud ring in 30ms
-	-- Any reaction delay means we miss. Fire the touch immediately.
-	doHit(ball)
-end
-
--- ── Main loop ─────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 local function getRoot()
 	local c = plr.Character
 	return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChildWhichIsA("BasePart"))
@@ -449,8 +386,55 @@ local function enable()
 	active     = true
 	cachedBall = nil
 	myRing     = makeRing(RADIUS, RING_IDLE)
-	renderConn = RunService.Heartbeat:Connect(update)
-	print("[AutoDeflect] ON — searching for ball...")
+
+	-- Ring visual update (separate from click loop)
+	renderConn = RunService.RenderStepped:Connect(function()
+		local root = getRoot()
+		if not root then return end
+		positionRing(myRing, root.Position, RADIUS)
+		if cachedBall and cachedBall.Parent then
+			if #ballRing == 0 then
+				ballRing = makeRing(RADIUS * 0.3, BALL_RING_C, 0.2)
+			end
+			positionRing(ballRing, cachedBall.Position, RADIUS * 0.3)
+		end
+	end)
+
+	-- Simple click loop — same pattern as working manual test
+	task.spawn(function()
+		local VIM = game:GetService("VirtualInputManager")
+		local cx = workspace.CurrentCamera.ViewportSize.X / 2
+		local cy = workspace.CurrentCamera.ViewportSize.Y / 2
+
+		while active do
+			local root = getRoot()
+			local ball = cachedBall
+
+			if root and ball and ball.Parent then
+				local dist = (Vector3.new(ball.Position.X, root.Position.Y, ball.Position.Z) - root.Position).Magnitude
+				local vel  = ball.AssemblyLinearVelocity.Magnitude
+				local toPlayer = Vector3.new(root.Position.X - ball.Position.X, 0, root.Position.Z - ball.Position.Z)
+				local approaching = vel > BALL_MIN_VELOCITY and
+					Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z).Magnitude > 1 and
+					Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z).Unit:Dot(toPlayer.Unit) > 0.2
+
+				if dist <= RADIUS + BAND and approaching then
+					colorRing(myRing, RING_HOT)
+					-- Click — same timing as working manual test
+					VIM:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
+					task.wait(0.08)
+					VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+					task.wait(0.15)
+				else
+					colorRing(myRing, RING_IDLE)
+					task.wait(1/60)
+				end
+			else
+				colorRing(myRing, RING_IDLE)
+				task.wait(1/60)
+			end
+		end
+	end)
 end
 
 local function disable()
@@ -460,7 +444,6 @@ local function disable()
 	destroyRing(myRing) myRing = {}
 	destroyRing(ballRing) ballRing = {}
 	cachedBall = nil
-	print("[AutoDeflect] OFF")
 end
 
 -- ── UI ────────────────────────────────────────────────────────────────────────
@@ -489,7 +472,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  AUTO-HIT  v15"
+title.Text             = "⬤  AUTO-HIT  v16"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
@@ -603,7 +586,7 @@ _G._AutoDeflectCleanup = function()
 	pcall(ringFolder.Destroy, ringFolder)
 end
 
-print("[AutoDeflect] v15 loaded - DEBUG off, close console before using")
+print("[AutoDeflect] v16 loaded - simple while loop same as working test")
 print("[AutoDeflect] Click ON — blue ring = your zone, yellow ring = ball tracking")
 print("[AutoDeflect] Ball enters your ring -> F triggered instantly")
 
