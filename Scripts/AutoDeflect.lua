@@ -136,18 +136,12 @@ local function pressDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- Fire the actual button click event
+	-- Fire the actual DeflectButton click instantly
 	if deflectBtn then
-		pcall(function()
-			local conn
-			conn = deflectBtn.MouseButton1Click:Connect(function() end)
-			conn:Disconnect()
-			deflectBtn.MouseButton1Click:Fire()
-		end)
+		pcall(function() deflectBtn.MouseButton1Click:Fire() end)
 	end
-	-- F key backup
+	-- F key as backup (no wait - fire and forget)
 	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
-	task.wait(0.05)
 	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
@@ -159,7 +153,7 @@ local function startClicking()
 	task.spawn(function()
 		while clicking and active do
 			pressDeflect()
-			task.wait(0.18)
+			task.wait(0.08)
 		end
 	end)
 end
@@ -171,8 +165,6 @@ end
 
 
 -- ── Main update ───────────────────────────────────────────────────────────────
-local lastInRing = 0
-
 local function update()
 	local root = getRoot()
 	if not root then return end
@@ -205,25 +197,18 @@ local function update()
 	-- Click when ball enters ring, keep clicking for grace period after it leaves
 	if ball and ball.Parent then
 		local dist = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z).Magnitude
-		if dist <= RADIUS + BAND then
+		local ballSpeed = ball.AssemblyLinearVelocity.Magnitude
+		-- Only trigger on fast-moving ball (not a player walking through)
+		if dist <= RADIUS + BAND and ballSpeed >= BALL_MIN_VEL then
 			colorRing(myRing, RING_HOT)
 			startClicking()
-			lastInRing = tick()
 		else
-			-- Keep clicking for 0.5s after ball leaves (grace period)
-			if tick() - lastInRing < 0.5 then
-				colorRing(myRing, RING_HOT)
-				-- keep clicking
-			else
-				colorRing(myRing, RING_IDLE)
-				stopClicking()
-			end
-		end
-	else
-		if tick() - lastInRing >= 0.5 then
 			colorRing(myRing, RING_IDLE)
 			stopClicking()
 		end
+	else
+		colorRing(myRing, RING_IDLE)
+		stopClicking()
 	end
 end
 
@@ -259,7 +244,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v20"
+title.Text="⬤  AUTO-HIT  v21"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
