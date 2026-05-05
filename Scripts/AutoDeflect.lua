@@ -251,7 +251,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v24"
+title.Text="⬤  AUTO-HIT  v25"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
