@@ -25,7 +25,7 @@ local plr              = Players.LocalPlayer
 
 local RADIUS    = 30
 local SEGMENTS  = 48
-local REFIRE_CD = 0.3
+local REFIRE_CD = 0.8
 local RING_IDLE = Color3.fromRGB(0, 180, 255)
 local RING_HOT  = Color3.fromRGB(255, 50, 50)
 local BALL_COL  = Color3.fromRGB(255, 200, 0)
@@ -165,13 +165,9 @@ local function update()
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 
-	-- Predict time until ball reaches sword range (5 studs)
-	-- Fire F that many milliseconds from now
-	local SWORD_RANGE = 5  -- studs where sword hits ball
-	local timeToArrival = speed > 1 and (dist - SWORD_RANGE) / speed or 999
-
-	-- Fire when ball is ~150ms away from sword range
-	local shouldFire = timeToArrival <= 0.15 and timeToArrival >= 0 and speed > 5
+	-- Fire when ball is in sweet spot: 3-9 studs away
+	-- Too close (0-2) = already hit, Too far (10+) = animation ends before ball arrives
+	local shouldFire = dist <= 9 and dist >= 2 and speed > 3
 
 	if shouldFire then
 		colorRing(myRing, RING_HOT)
@@ -221,7 +217,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v49"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v50"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
@@ -304,4 +300,4 @@ end
 
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
-print("[AutoDeflect] v48 - aim mouse at ball then F")
+print("[AutoDeflect] v50 - sweet spot dist 2-9
