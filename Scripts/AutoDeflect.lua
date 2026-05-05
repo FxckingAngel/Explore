@@ -183,29 +183,18 @@ local function update()
 	local toPlayerFlat = Vector3.new(toPlayer.X, 0, toPlayer.Z)
 	local velFlat   = Vector3.new(ballVel.X, 0, ballVel.Z)
 
-	-- Is ball aimed at us?
+	-- Fire when ball is close AND moving toward us
 	local aimedAtUs = false
-	if speed >= MIN_SPEED and dist <= MAX_DIST and velFlat.Magnitude > 1 and toPlayerFlat.Magnitude > 0 then
-		local dot = velFlat.Unit:Dot(toPlayerFlat.Unit)
-		aimedAtUs = dot >= AIM_DOT
-	end
-
-	-- Are we the closest player to the ball? (don't deflect if someone else is closer)
-	local weAreClosest = true
-	for _, p in pairs(Players:GetPlayers()) do
-		if p ~= plr and p.Character then
-			local otherRoot = p.Character:FindFirstChild("HumanoidRootPart")
-			if otherRoot then
-				local otherDist = (Vector3.new(ballPos.X, otherRoot.Position.Y, ballPos.Z) - otherRoot.Position).Magnitude
-				if otherDist < dist - 3 then  -- they're more than 3 studs closer
-					weAreClosest = false
-					break
-				end
-			end
+	if dist <= MAX_DIST and speed >= MIN_SPEED then
+		if velFlat.Magnitude > 1 and toPlayerFlat.Magnitude > 0 then
+			local dot = velFlat.Unit:Dot(toPlayerFlat.Unit)
+			aimedAtUs = dot >= AIM_DOT
 		end
+		-- If very close, always fire regardless of direction
+		if dist <= 8 then aimedAtUs = true end
 	end
 
-	if aimedAtUs and weAreClosest then
+	if aimedAtUs then
 		colorRing(myRing, RING_HOT)
 		local now = tick()
 		if now - lastFired >= REFIRE_CD then
@@ -256,7 +245,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v36"
+title.Text="⬤  AUTO-DEFLECT  v37"
 title.Font=Enum.Font.GothamBold title.TextSize=12
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,16)
@@ -345,5 +334,5 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v36 - fires at 15 studs")
+print("[AutoDeflect] v37 - simplified, no closest check")
 print("[AutoDeflect] Fires when ball aimed at you within 15 studs")
