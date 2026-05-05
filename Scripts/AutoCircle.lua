@@ -294,18 +294,18 @@ local function doHit(ball)
 		print(("[AutoCircle] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
-	-- DEFLECT key is F (shown in UI bottom left)
-	-- Also fire Mouse1 as backup
+	-- Fire deflect in a separate thread so Heartbeat isn't blocked
 	local cx = workspace.CurrentCamera.ViewportSize.X / 2
 	local cy = workspace.CurrentCamera.ViewportSize.Y / 2
-
-	-- F key (Deflect)
-	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
-	-- Mouse1 simultaneously
-	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
-	task.wait(rng(0.05, 0.09))
-	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
-	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+	task.spawn(function()
+		-- F key down + Mouse1 down
+		pcall(VIM.SendKeyEvent, VIM, true, Enum.KeyCode.F, false, game)
+		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true, game, 1)
+		task.wait(0.07)
+		-- F key up + Mouse1 up
+		pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
+		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+	end)
 
 	humanState.hitCount    = humanState.hitCount + 1
 	humanState.lastHitTime = tick()
