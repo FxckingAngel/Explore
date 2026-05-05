@@ -152,19 +152,27 @@ local function pressDeflect()
 	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
-local hasHitThisEntry = false  -- fired once per ball entry
+local lastDeflect = 0
+local DEFLECT_CD  = 0.3
 
 local function startClicking()
-	-- Only fire ONCE when ball enters ring
-	if hasHitThisEntry then return end
-	hasHitThisEntry = true
+	if clicking then return end
+	clicking = true
 	deflectBtn = getDeflectButton()
-	pressDeflect()
+	task.spawn(function()
+		while clicking and active do
+			local now = tick()
+			if now - lastDeflect >= DEFLECT_CD then
+				pressDeflect()
+				lastDeflect = now
+			end
+			task.wait(0.03)
+		end
+	end)
 end
 
 local function stopClicking()
-	-- Ball left ring - reset so next entry fires again
-	hasHitThisEntry = false
+	clicking = false
 end
 
 
@@ -249,7 +257,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v28"
+title.Text="⬤  AUTO-HIT  v29"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
