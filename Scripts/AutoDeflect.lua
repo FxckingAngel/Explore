@@ -96,9 +96,22 @@ local function getDeflectButton()
 	return nil
 end
 
+-- Ready = lighter color (R > 0.2), Cooldown = dark (R ~ 0.09)
+local function isReady()
+	if not deflectBtn or not deflectBtn.Parent then return true end
+	return deflectBtn.BackgroundColor3.R > 0.2
+end
+
 local function fireDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
+	end
+	-- Wait for ready state
+	if deflectBtn and not isReady() then
+		local t = tick()
+		while not isReady() and tick()-t < 2 do
+			task.wait(0.03)
+		end
 	end
 	if deflectBtn then
 		pcall(function()
@@ -196,8 +209,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v45"
-title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v45"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
