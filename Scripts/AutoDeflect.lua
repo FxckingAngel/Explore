@@ -190,7 +190,7 @@ local function findBall()
 		local rock = fx:FindFirstChild("RockTemplate")
 		if rock and looksLikeBall(rock) then
 			if rock ~= lockedBall and DEBUG then
-				print("[AutoCircle] Locked: " .. rock:GetFullName()
+				print("[AutoDeflect] Locked: " .. rock:GetFullName()
 					.. " vel=" .. string.format("%.1f", rock.AssemblyLinearVelocity.Magnitude))
 			end
 			lockedBall = rock
@@ -204,7 +204,7 @@ local function findBall()
 			if looksLikeBall(obj) then
 				lockedBall = obj
 				if DEBUG then
-					print("[AutoCircle] Locked (fallback): " .. obj:GetFullName())
+					print("[AutoDeflect] Locked (fallback): " .. obj:GetFullName())
 				end
 				return obj
 			end
@@ -291,7 +291,7 @@ local function doHit(ball)
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 	if DEBUG then
-		print(("[AutoCircle] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
+		print(("[AutoDeflect] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
 	-- Fire deflect in a separate thread so Heartbeat isn't blocked
@@ -325,7 +325,7 @@ local function triggerF(ball)
 	local missChance = getMissChance(speed)
 	if math.random() < missChance then
 		if DEBUG then
-			print(("[AutoCircle] MISS (%.0f%% chance at speed=%.0f)"):format(missChance*100, speed))
+			print(("[AutoDeflect] MISS (%.0f%% chance at speed=%.0f)"):format(missChance*100, speed))
 		end
 		return
 	end
@@ -336,7 +336,7 @@ local function triggerF(ball)
 
 	if DEBUG then
 		local reaction = getReactionTime(speed)
-		print(("[AutoCircle] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
+		print(("[AutoDeflect] HIT  speed=%.0f  reaction=~%.0fms  fatigue=%.0fms  hits=%d"):format(
 			speed, reaction*1000, humanState.fatigue*1000, humanState.hitCount))
 	end
 
@@ -363,9 +363,9 @@ local function watchFX(fx)
 		if child.Name == "RockTemplate" then
 			cachedBall = child
 			local now = tick()
-			if now - lastBallAppear > 1 and DEBUG then
-				print("[AutoCircle] Ball in play")
+			if now - lastBallAppear > 2 then
 				lastBallAppear = now
+				if DEBUG then print("[AutoDeflect] Ball in play") end
 			end
 		end
 	end)
@@ -451,7 +451,7 @@ local function enable()
 	cachedBall = nil
 	myRing     = makeRing(RADIUS, RING_IDLE)
 	renderConn = RunService.Heartbeat:Connect(update)
-	print("[AutoCircle] ON — searching for ball...")
+	print("[AutoDeflect] ON — searching for ball...")
 end
 
 local function disable()
@@ -461,7 +461,7 @@ local function disable()
 	destroyRing(myRing) myRing = {}
 	destroyRing(ballRing) ballRing = {}
 	cachedBall = nil
-	print("[AutoCircle] OFF")
+	print("[AutoDeflect] OFF")
 end
 
 -- ── UI ────────────────────────────────────────────────────────────────────────
@@ -604,9 +604,9 @@ _G._AutoCircleCleanup = function()
 	pcall(ringFolder.Destroy, ringFolder)
 end
 
-print("[AutoCircle] v8 loaded - Mouse1 click, direct path ball lookup")
-print("[AutoCircle] Click ON — blue ring = your zone, yellow ring = ball tracking")
-print("[AutoCircle] Ball enters your ring -> F triggered instantly")
+print("[AutoDeflect] v8 loaded - Mouse1 click, direct path ball lookup")
+print("[AutoDeflect] Click ON — blue ring = your zone, yellow ring = ball tracking")
+print("[AutoDeflect] Ball enters your ring -> F triggered instantly")
 
 --[[
 DIAGNOSTIC: run this separately to find the hit remote
