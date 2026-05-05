@@ -380,14 +380,25 @@ local function update()
 		end
 	end
 
-	-- Check if ball is in your ring AND actually moving
+	-- Trigger when ball is in ring AND approaching (before it hits)
 	if ball and ball.Parent then
-		local flatDist = Vector3.new(
-			ball.Position.X - origin.X,
-			0,
-			ball.Position.Z - origin.Z
-		).Magnitude
-		if flatDist <= RADIUS + BAND then
+		local toPlayer    = Vector3.new(origin.X - ball.Position.X, 0, origin.Z - ball.Position.Z)
+		local flatDist    = toPlayer.Magnitude
+		local ballSpeed   = ball.AssemblyLinearVelocity.Magnitude
+		local ballVelFlat = Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z)
+
+		-- Is ball heading toward us?
+		local approaching = false
+		if ballVelFlat.Magnitude > 1 and flatDist > 0 then
+			approaching = ballVelFlat.Unit:Dot(toPlayer.Unit) > 0.2
+		end
+
+		-- Hit if approaching fast, OR ball is almost on top of us
+		local inRing  = flatDist <= RADIUS + BAND
+		local veryClose = flatDist <= RADIUS * 0.5
+		local fastIncoming = inRing and approaching and ballSpeed >= BALL_MIN_VELOCITY
+
+		if fastIncoming or veryClose then
 			colorRing(myRing, RING_HOT)
 			triggerF(ball)
 		else
@@ -444,7 +455,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  DEATHBALL AUTO-HIT"
+title.Text             = "⬤  DEATHBALL AUTO-HIT  v9"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
