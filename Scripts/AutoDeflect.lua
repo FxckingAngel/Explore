@@ -30,10 +30,10 @@ local VIM              = game:GetService("VirtualInputManager")
 local plr              = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local MAX_DIST     = 60    -- only care about ball within 60 studs
-local AIM_DOT      = 0.7   -- how directly aimed at us (0.7 = within ~45 degrees)
+local MAX_DIST     = 15    -- only care about ball within 60 studs
+local AIM_DOT      = 0.5   -- how directly aimed at us (0.7 = within ~45 degrees)
 local MIN_SPEED    = 15    -- ignore slow/stationary ball
-local REFIRE_CD    = 0.6   -- min seconds between deflects
+local REFIRE_CD    = 0.5   -- min seconds between deflects
 local SEGMENTS     = 48    -- ring smoothness
 
 local RING_IDLE = Color3.fromRGB(0, 180, 255)
@@ -256,7 +256,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v35"
+title.Text="⬤  AUTO-DEFLECT  v36"
 title.Font=Enum.Font.GothamBold title.TextSize=12
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,16)
@@ -345,5 +345,5 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v35 loaded - velocity direction detection")
-print("[AutoDeflect] Fires when ball aimed at you from up to "..MAX_DIST.." studs away")
+print("[AutoDeflect] v36 - fires at 15 studs")
+print("[AutoDeflect] Fires when ball aimed at you within 15 studs")
