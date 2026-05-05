@@ -121,30 +121,54 @@ workspace.ChildAdded:Connect(function(c)
 end)
 
 -- ── Click loop ────────────────────────────────────────────────────────────────
+local deflectBtn = nil
+
+local function getDeflectButton()
+	for _, v in pairs(plr.PlayerGui:GetDescendants()) do
+		if v.Name == "DeflectButton" and v:IsA("GuiButton") then
+			return v
+		end
+	end
+	return nil
+end
+
+local function pressDeflect()
+	if not deflectBtn or not deflectBtn.Parent then
+		deflectBtn = getDeflectButton()
+	end
+	-- Fire the actual button click event
+	if deflectBtn then
+		pcall(function()
+			local conn
+			conn = deflectBtn.MouseButton1Click:Connect(function() end)
+			conn:Disconnect()
+			deflectBtn.MouseButton1Click:Fire()
+		end)
+	end
+	-- F key backup
+	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
+	task.wait(0.05)
+	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
+end
+
 local function startClicking()
 	if clicking then return end
 	clicking = true
-	print("[AutoDeflect] CLICKING STARTED")
+	deflectBtn = getDeflectButton()
+	print("[AutoDeflect] START btn=" .. tostring(deflectBtn and deflectBtn:GetFullName() or "nil"))
 	task.spawn(function()
-		local count = 0
 		while clicking and active do
-			pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
-			task.wait(0.08)
-			pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
-			task.wait(0.12)
-			count = count + 1
-			if count % 5 == 0 then
-				print("[AutoDeflect] F pressed x"..count)
-			end
+			pressDeflect()
+			task.wait(0.18)
 		end
-		pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
-		print("[AutoDeflect] CLICKING STOPPED")
 	end)
 end
 
 local function stopClicking()
 	clicking = false
+	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
+
 
 -- ── Main update ───────────────────────────────────────────────────────────────
 local lastInRing = 0
@@ -235,7 +259,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v19"
+title.Text="⬤  AUTO-HIT  v20"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
@@ -323,4 +347,4 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v19 - grace period 0.5s after ball leaves")
+print("[AutoDeflect] v20 - fires actual DeflectButton in game UI")
