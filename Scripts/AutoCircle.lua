@@ -294,11 +294,17 @@ local function doHit(ball)
 		print(("[AutoCircle] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
-	-- Game just needs Mouse1 click anywhere — auto-swings
+	-- DEFLECT key is F (shown in UI bottom left)
+	-- Also fire Mouse1 as backup
 	local cx = workspace.CurrentCamera.ViewportSize.X / 2
 	local cy = workspace.CurrentCamera.ViewportSize.Y / 2
+
+	-- F key (Deflect)
+	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
+	-- Mouse1 simultaneously
 	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
 	task.wait(rng(0.05, 0.09))
+	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
 
 	humanState.hitCount    = humanState.hitCount + 1
@@ -349,13 +355,18 @@ local cachedBall    = nil
 local ballSearchTick = 0
 
 -- Pre-cache ball instantly using ChildAdded (no polling lag)
+local lastBallAppear = 0
 local function watchFX(fx)
 	local rock = fx:FindFirstChild("RockTemplate")
 	if rock then cachedBall = rock end
 	fx.ChildAdded:Connect(function(child)
 		if child.Name == "RockTemplate" then
 			cachedBall = child
-			if DEBUG then print("[AutoCircle] Ball appeared") end
+			local now = tick()
+			if now - lastBallAppear > 1 and DEBUG then
+				print("[AutoCircle] Ball in play")
+				lastBallAppear = now
+			end
 		end
 	end)
 	fx.ChildRemoved:Connect(function(child)
