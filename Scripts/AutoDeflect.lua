@@ -106,13 +106,7 @@ local function fireDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- Wait for ready state
-	if deflectBtn and not isReady() then
-		local t = tick()
-		while not isReady() and tick()-t < 2 do
-			task.wait(0.03)
-		end
-	end
+	-- Fire immediately, no wait - game handles its own cooldown
 	if deflectBtn then
 		pcall(function()
 			local conn=deflectBtn.MouseButton1Click:Connect(function() end)
@@ -213,7 +207,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v46"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v47"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
@@ -296,4 +290,4 @@ end
 
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
-print("[AutoDeflect] v46 - early fire on fast ball")
+print("[AutoDeflect] v47 - no cooldown wait, fire instantly")
