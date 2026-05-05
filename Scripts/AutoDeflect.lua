@@ -156,27 +156,21 @@ local function pressDeflect()
 	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
-local lastDeflect = 0
-local DEFLECT_CD  = 0.3
+local lastFired = 0
+local REFIRE_CD = 0.5  -- won't fire again within this window
 
 local function startClicking()
-	if clicking then return end
-	clicking = true
+	local now = tick()
+	if now - lastFired < REFIRE_CD then return end
+	lastFired = now
 	deflectBtn = getDeflectButton()
+	-- 3 rapid presses the moment ball is detected in ring
 	task.spawn(function()
-		while clicking and active do
-			if SPAM_MODE then
-				pressDeflect()
-				task.wait()
-			else
-				local now = tick()
-				if now - lastDeflect >= DEFLECT_CD then
-					pressDeflect()
-					lastDeflect = now
-				end
-				task.wait(0.03)
-			end
-		end
+		pressDeflect()
+		task.wait(0.06)
+		pressDeflect()
+		task.wait(0.06)
+		pressDeflect()
 	end)
 end
 
@@ -266,7 +260,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v31"
+title.Text="⬤  AUTO-HIT  v33"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
