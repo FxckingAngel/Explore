@@ -294,16 +294,12 @@ local function doHit(ball)
 		print(("[AutoDeflect] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
-	-- Fire deflect in a separate thread so Heartbeat isn't blocked
 	local cx = workspace.CurrentCamera.ViewportSize.X / 2
 	local cy = workspace.CurrentCamera.ViewportSize.Y / 2
-	task.spawn(function()
-		-- F key down + Mouse1 down
-		pcall(VIM.SendKeyEvent, VIM, true, Enum.KeyCode.F, false, game)
-		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true, game, 1)
-		task.wait(0.07)
-		-- F key up + Mouse1 up
-		pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
+	-- Small delay so game input handler is ready (same as manual click timing)
+	task.delay(0.05, function()
+		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
+		task.wait(0.08)
 		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
 	end)
 
@@ -490,7 +486,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  AUTO-HIT  v12"
+title.Text             = "⬤  AUTO-HIT  v13"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
@@ -604,7 +600,7 @@ _G._AutoDeflectCleanup = function()
 	pcall(ringFolder.Destroy, ringFolder)
 end
 
-print("[AutoDeflect] v8 loaded - Mouse1 click, direct path ball lookup")
+print("[AutoDeflect] v13 loaded - 50ms pre-delay click")
 print("[AutoDeflect] Click ON — blue ring = your zone, yellow ring = ball tracking")
 print("[AutoDeflect] Ball enters your ring -> F triggered instantly")
 
