@@ -147,6 +147,8 @@ local function stopClicking()
 end
 
 -- ── Main update ───────────────────────────────────────────────────────────────
+local lastInRing = 0
+
 local function update()
 	local root = getRoot()
 	if not root then return end
@@ -176,35 +178,28 @@ local function update()
 		destroyRing(ballRing) ballRing = {}
 	end
 
-	-- Check if ball in ring and approaching
+	-- Click when ball enters ring, keep clicking for grace period after it leaves
 	if ball and ball.Parent then
-		local toPlayer = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z)
-		local dist     = toPlayer.Magnitude
-		local speed    = ball.AssemblyLinearVelocity.Magnitude
-		local velFlat  = Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z)
-
-		local approaching = speed >= BALL_MIN_VEL and velFlat.Magnitude > 0.5
-			and velFlat.Unit:Dot(toPlayer.Unit) > 0.1
-
-		local inRing    = dist <= RADIUS + BAND
-		local veryClose = dist <= RADIUS * 0.5
-
-		if inRing and (approaching or veryClose) then
+		local dist = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z).Magnitude
+		if dist <= RADIUS + BAND then
 			colorRing(myRing, RING_HOT)
-			if not clicking then
-				print("[AutoDeflect] BALL IN RING dist="..string.format("%.1f",dist).." speed="..string.format("%.1f",speed).." approaching="..tostring(approaching))
-			end
 			startClicking()
+			lastInRing = tick()
 		else
-			colorRing(myRing, RING_IDLE)
-			if clicking then
-				print("[AutoDeflect] Ball left ring")
+			-- Keep clicking for 0.5s after ball leaves (grace period)
+			if tick() - lastInRing < 0.5 then
+				colorRing(myRing, RING_HOT)
+				-- keep clicking
+			else
+				colorRing(myRing, RING_IDLE)
+				stopClicking()
 			end
-			stopClicking()
 		end
 	else
-		colorRing(myRing, RING_IDLE)
-		stopClicking()
+		if tick() - lastInRing >= 0.5 then
+			colorRing(myRing, RING_IDLE)
+			stopClicking()
+		end
 	end
 end
 
@@ -240,7 +235,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v18"
+title.Text="⬤  AUTO-HIT  v19"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
@@ -328,4 +323,4 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v18 debug - watching for ball and clicks")
+print("[AutoDeflect] v19 - grace period 0.5s after ball leaves")
