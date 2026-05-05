@@ -174,35 +174,37 @@ local function looksLikeBall(obj)
 	return false
 end
 
--- Find the FASTEST moving non-player meshed object = the ball
+-- Find ball — check direct path first (fast), then scan
 local function findBall()
-	if lockedBall and lockedBall.Parent and looksLikeBall(lockedBall) then
-		return lockedBall
+	-- Direct path: Workspace.FX.RockTemplate
+	local fx = workspace:FindFirstChild("FX")
+	if fx then
+		local rock = fx:FindFirstChild("RockTemplate")
+		if rock and looksLikeBall(rock) then
+			if rock ~= lockedBall and DEBUG then
+				print("[AutoCircle] Locked: " .. rock:GetFullName()
+					.. " vel=" .. string.format("%.1f", rock.AssemblyLinearVelocity.Magnitude))
+			end
+			lockedBall = rock
+			return rock
+		end
 	end
 
-	lockedBall = nil
-	local bestVel = 0
-	local bestObj = nil
-
-	for _, obj in pairs(workspace:GetDescendants()) do
-		if looksLikeBall(obj) then
-			local vel = obj.AssemblyLinearVelocity.Magnitude
-			if vel > bestVel then
-				bestVel = vel
-				bestObj = obj
+	-- Fallback: scan FX folder only (much faster than GetDescendants)
+	if fx then
+		for _, obj in pairs(fx:GetChildren()) do
+			if looksLikeBall(obj) then
+				lockedBall = obj
+				if DEBUG then
+					print("[AutoCircle] Locked (fallback): " .. obj:GetFullName())
+				end
+				return obj
 			end
 		end
 	end
 
-	if bestObj then
-		lockedBall = bestObj
-		if DEBUG then
-			print("[AutoCircle] Locked ball: " .. bestObj:GetFullName()
-				.. " vel=" .. string.format("%.1f", bestVel)
-				.. " size=" .. tostring(bestObj.Size))
-		end
-	end
-	return lockedBall
+	lockedBall = nil
+	return nil
 end
 
 -- lockedBall declared before looksLikeBall (used inside it)
@@ -284,28 +286,12 @@ local function doHit(ball)
 		print(("[AutoCircle] HIT speed=%.0f hits=%d"):format(speed, humanState.hitCount + 1))
 	end
 
-	-- Game uses Mouse1 click to swing sword at ball
-	-- Simulate click at ball's screen position
-	local camera = workspace.CurrentCamera
-	local screenPos, onScreen = camera:WorldToScreenPoint(ball.Position)
-
-	pcall(function()
-		if onScreen then
-			-- Click directly on ball
-			VIM:SendMouseMoveEvent(screenPos.X, screenPos.Y, game)
-			task.wait(0.008)
-			VIM:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true,  game, 1)
-			task.wait(rng(0.05, 0.10))
-			VIM:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
-		else
-			-- Ball not on screen, click center
-			local cx = camera.ViewportSize.X / 2
-			local cy = camera.ViewportSize.Y / 2
-			VIM:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
-			task.wait(rng(0.05, 0.10))
-			VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-		end
-	end)
+	-- Game just needs Mouse1 click anywhere — auto-swings
+	local cx = workspace.CurrentCamera.ViewportSize.X / 2
+	local cy = workspace.CurrentCamera.ViewportSize.Y / 2
+	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
+	task.wait(rng(0.05, 0.09))
+	pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
 
 	humanState.hitCount    = humanState.hitCount + 1
 	humanState.lastHitTime = tick()
@@ -362,10 +348,10 @@ local function update()
 	-- Reposition your ring
 	positionRing(myRing, origin, RADIUS)
 
-	-- Find ball — locks onto sphere, re-checks only if lost
+	-- Find ball — check cached first, re-search every 0.5s only if lost
 	local now = tick()
-	if not cachedBall or not cachedBall.Parent or not looksLikeBall(cachedBall) then
-		if now - ballSearchTick > 0.3 then
+	if not cachedBall or not cachedBall.Parent then
+		if now - ballSearchTick > 0.5 then
 			cachedBall = findBall()
 			ballSearchTick = now
 		end
