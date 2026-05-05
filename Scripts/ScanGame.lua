@@ -1,101 +1,117 @@
 --[[
-	ScanGame — Deathball Health System Scanner
-	Scans all accessible scripts for health/damage/hit logic
+	ScanGame v2 — Uses setscriptable + decompile like Explorer does
 	
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/main/Scripts/ScanGame.lua"))()
 ]]
 
 local plr = game:GetService("Players").LocalPlayer
-local results = {}
-
-local function getSource(script)
-	local ok, src = pcall(function()
-		setscriptable(script, "Source", true)
-		return script.Source
-	end)
-	if ok and src and #src > 0 then return src end
-	local decompile = rawget(_G, "decompile")
-	if decompile then
-		local ok2, src2 = pcall(decompile, script)
-		if ok2 and src2 and #src2 > 0 then return src2 end
-	end
-	return nil
-end
-
 local keywords = {
-	"health", "damage", "hit", "deflect", "lives", "death",
-	"hurt", "hp", "shield", "block", "ball", "RockTemplate"
+	"health","damage","hit","deflect","lives","death",
+	"hurt","hp","shield","block","ball","RockTemplate",
+	"deflectbutton","toolbar","ability"
 }
 
-local function containsKeyword(src)
-	local low = src:lower()
-	for _, kw in pairs(keywords) do
-		if low:find(kw:lower(), 1, true) then return kw end
+local function getSource(obj)
+	-- Method 1: setscriptable
+	local ok, src = pcall(function()
+		setscriptable(obj, "Source", true)
+		return obj.Source
+	end)
+	if ok and type(src)=="string" and #src > 20 then return src end
+
+	-- Method 2: decompile
+	local decompile = rawget(_G,"decompile") or rawget(_G,"decomp")
+	if decompile then
+		local ok2, src2 = pcall(decompile, obj)
+		if ok2 and type(src2)=="string" and #src2 > 20 then return src2 end
 	end
+
+	-- Method 3: getscriptbytecode -> decompile
+	local gbc = rawget(_G,"getscriptbytecode") or rawget(_G,"dumpstring")
+	if gbc and decompile then
+		local ok3, bc = pcall(gbc, obj)
+		if ok3 then
+			local ok4, src3 = pcall(decompile, bc)
+			if ok4 and type(src3)=="string" and #src3 > 20 then return src3 end
+		end
+	end
+
 	return nil
 end
 
-print("[Scan] Starting scan of all accessible scripts...")
-local count = 0
-local found = 0
+local function scan(obj, depth)
+	depth = depth or 0
+	if depth > 10 then return end
 
-for _, obj in pairs(game:GetDescendants()) do
+	local src = nil
 	if obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Script") then
-		count = count + 1
-		local src = getSource(obj)
-		if src and #src > 10 then
-			local kw = containsKeyword(src)
-			if kw then
-				found = found + 1
-				print("\n[MATCH] " .. obj:GetFullName() .. " (keyword: " .. kw .. ")")
-				-- Print relevant lines
-				local lines = src:split("\n")
-				for i, line in pairs(lines) do
-					local low = line:lower()
-					for _, k in pairs(keywords) do
-						if low:find(k:lower(), 1, true) then
-							print("  L" .. i .. ": " .. line:sub(1, 120))
-							break
+		src = getSource(obj)
+		if src and #src > 20 then
+			local low = src:lower()
+			for _, kw in pairs(keywords) do
+				if low:find(kw:lower(), 1, true) then
+					print("\n[MATCH] "..obj:GetFullName().." | kw="..kw.." | len="..#src)
+					-- Print lines with keywords
+					for i, line in pairs(src:split("\n")) do
+						local ll = line:lower()
+						for _, k in pairs(keywords) do
+							if ll:find(k:lower(),1,true) then
+								print("  "..i..": "..line:sub(1,150))
+								break
+							end
 						end
 					end
+					break
 				end
 			end
 		end
 	end
-end
 
-print("\n[Scan] Done. Scanned "..count.." scripts, found "..found.." matches.")
-
--- Also scan for health-related RemoteEvents
-print("\n[Scan] RemoteEvents with health/damage/hit names:")
-for _, obj in pairs(game:GetDescendants()) do
-	if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-		local name = obj.Name:lower()
-		for _, kw in pairs(keywords) do
-			if name:find(kw:lower(), 1, true) then
-				print("  " .. obj.ClassName .. ": " .. obj:GetFullName())
-				break
-			end
+	-- Recurse children
+	local ok, children = pcall(function() return obj:GetChildren() end)
+	if ok then
+		for _, child in pairs(children) do
+			scan(child, depth+1)
 		end
 	end
 end
 
--- Scan for health-related values in character and PlayerGui
-print("\n[Scan] Values in character:")
-if plr.Character then
-	for _, v in pairs(plr.Character:GetDescendants()) do
-		if v:IsA("NumberValue") or v:IsA("IntValue") or v:IsA("StringValue") then
-			print("  " .. v.Name .. " = " .. tostring(v.Value) .. " (" .. v:GetFullName() .. ")")
-		end
-	end
+print("[ScanGame v2] Scanning with Explorer-level access...")
+print("[ScanGame v2] Checking PlayerGui, ReplicatedFirst, ReplicatedStorage...")
+
+-- Focus on most likely locations
+local targets = {
+	plr.PlayerGui,
+	game:GetService("ReplicatedFirst"),
+	game:GetService("ReplicatedStorage"),
+	game:GetService("StarterGui"),
+}
+
+for _, target in pairs(targets) do
+	print("\n--- Scanning: "..target:GetFullName().." ---")
+	scan(target)
 end
 
-print("\n[Scan] Values in PlayerGui.HUD:")
-local hud = plr.PlayerGui:FindFirstChild("HUD", true)
+print("\n[ScanGame v2] Done.")
+
+-- Also print the HUD tree structure
+print("\n[HUD Tree]")
+local hud = plr.PlayerGui:FindFirstChild("HUD")
 if hud then
-	for _, v in pairs(hud:GetDescendants()) do
-		if v:IsA("NumberValue") or v:IsA("IntValue") or v:IsA("StringValue") then
-			print("  " .. v.Name .. " = " .. tostring(v.Value) .. " (" .. v:GetFullName() .. ")")
+	local function printTree(obj, indent)
+		indent = indent or ""
+		local extra = ""
+		if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+			local src = getSource(obj)
+			extra = src and (" [src:"..#src.."chars]") or " [no src]"
+		end
+		if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+			extra = ' "'..obj.Text..'"'
+		end
+		print(indent..obj.Name.." ("..obj.ClassName..")"..extra)
+		for _, child in pairs(obj:GetChildren()) do
+			printTree(child, indent.."  ")
 		end
 	end
+	printTree(hud)
 end
