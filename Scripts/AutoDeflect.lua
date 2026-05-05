@@ -136,11 +136,18 @@ local function pressDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- Fire the actual DeflectButton click instantly
 	if deflectBtn then
-		pcall(function() deflectBtn.MouseButton1Click:Fire() end)
+		-- Method that worked in v20
+		pcall(function()
+			local conn = deflectBtn.MouseButton1Click:Connect(function() end)
+			conn:Disconnect()
+			deflectBtn.MouseButton1Click:Fire()
+		end)
+		-- Also try InputBegan simulation on the button
+		pcall(function()
+			deflectBtn:FireMouseButtonEvent(Enum.UserInputType.MouseButton1, Vector2.new(0.5, 0.5))
+		end)
 	end
-	-- F key as backup (no wait - fire and forget)
 	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
 	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
@@ -244,7 +251,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v21"
+title.Text="⬤  AUTO-HIT  v22"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
