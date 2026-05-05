@@ -1,12 +1,12 @@
 --[[
-	AutoCircle — Deathball Auto-Hit
+	AutoDeflect — Deathball Auto-Hit
 	FxckingAngel/Explore
 
 	Draws a 30-stud ring around your character.
 	When the Deathball enters your ring, auto-triggers F instantly.
 	The ball also gets its own tracking ring so you can see it.
 	
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoCircle.lua?v=" .. tostring(math.random(1,999999))))()
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoDeflect.lua?v=" .. tostring(math.random(1,999999))))()
 ]]
 
 -- ── Kill previous instance ───────────────────────────────────────────────────
@@ -15,17 +15,17 @@ local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
 
--- Stop any previously running AutoCircle
-if _G._AutoCircleCleanup then
-	pcall(_G._AutoCircleCleanup)
-	_G._AutoCircleCleanup = nil
+-- Stop any previously running AutoDeflect
+if _G._AutoDeflectCleanup then
+	pcall(_G._AutoDeflectCleanup)
+	_G._AutoDeflectCleanup = nil
 end
 -- Remove old ring folder
-local oldFolder = workspace:FindFirstChild("_AutoCircle")
+local oldFolder = workspace:FindFirstChild("_AutoDeflect")
 if oldFolder then oldFolder:Destroy() end
 -- Remove old GUI
 for _, holder in pairs({game:GetService("CoreGui"), Players.LocalPlayer.PlayerGui}) do
-	local old = holder:FindFirstChild("AutoCircleUI")
+	local old = holder:FindFirstChild("AutoDeflectUI")
 	if old then old:Destroy() end
 end
 task.wait(0.15)
@@ -226,7 +226,7 @@ local lastTrigger = 0
 local renderConn  = nil
 
 local ringFolder  = Instance.new("Folder")
-ringFolder.Name   = "_AutoCircle"
+ringFolder.Name   = "_AutoDeflect"
 ringFolder.Parent = workspace
 
 -- ── Ring ──────────────────────────────────────────────────────────────────────
@@ -467,12 +467,12 @@ end
 -- ── UI ────────────────────────────────────────────────────────────────────────
 -- Clean up old instance
 for _, holder in pairs({game:GetService("CoreGui"), plr.PlayerGui}) do
-	local old = holder:FindFirstChild("AutoCircleUI")
+	local old = holder:FindFirstChild("AutoDeflectUI")
 	if old then old:Destroy() end
 end
 
 local gui = Instance.new("ScreenGui")
-gui.Name          = "AutoCircleUI"
+gui.Name          = "AutoDeflectUI"
 gui.ResetOnSpawn  = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder  = 9999
@@ -598,7 +598,7 @@ local ok = pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent = ok and game:GetService("CoreGui") or plr.PlayerGui
 
 -- Register cleanup so re-running kills this instance
-_G._AutoCircleCleanup = function()
+_G._AutoDeflectCleanup = function()
 	disable()
 	pcall(gui.Destroy, gui)
 	pcall(ringFolder.Destroy, ringFolder)
