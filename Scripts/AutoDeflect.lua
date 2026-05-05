@@ -145,13 +145,25 @@ local function update()
 		print("[AD] dist="..math.floor(dist).." speed="..math.floor(ball.AssemblyLinearVelocity.Magnitude).." radius="..RADIUS)
 	end
 
-	if dist <= RADIUS then
+	-- Velocity aim: detect ball aimed at us from far away
+	local ballVel = ball.AssemblyLinearVelocity
+	local speed   = ballVel.Magnitude
+	local velFlat = Vector3.new(ballVel.X, 0, ballVel.Z)
+	local toMe    = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z)
+	local aimed   = false
+	if speed > 10 and velFlat.Magnitude > 0.5 and toMe.Magnitude > 0 then
+		aimed = velFlat.Unit:Dot(toMe.Unit) > 0.85
+	end
+
+	if (aimed and dist <= 40) or dist <= 6 then
 		colorRing(myRing, RING_HOT)
 		local now=tick()
 		if now-lastFired >= REFIRE_CD then
 			lastFired=now
-			print("[AD] FIRING DEFLECT dist="..math.floor(dist))
+			print("[AD] FIRE dist="..math.floor(dist).." aimed="..tostring(aimed).." spd="..math.floor(speed))
 			task.spawn(function()
+				fireDeflect()
+				task.wait(0.05)
 				fireDeflect()
 			end)
 		end
@@ -275,4 +287,4 @@ end
 
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
-print("[AutoDeflect] v43 - velocity aim detection 40s")
+print("[AutoDeflect] v43 - velocity aim detection")
