@@ -6,7 +6,7 @@
 	When the Deathball enters your ring, auto-triggers F instantly.
 	The ball also gets its own tracking ring so you can see it.
 	
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoCircle.lua"))()
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoCircle.lua?v=" .. tostring(math.random(1,999999))))()
 ]]
 
 -- ── Kill previous instance ───────────────────────────────────────────────────
