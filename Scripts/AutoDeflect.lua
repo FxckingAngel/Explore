@@ -124,14 +124,21 @@ end)
 local function startClicking()
 	if clicking then return end
 	clicking = true
+	print("[AutoDeflect] CLICKING STARTED")
 	task.spawn(function()
+		local count = 0
 		while clicking and active do
 			pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
 			task.wait(0.08)
 			pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 			task.wait(0.12)
+			count = count + 1
+			if count % 5 == 0 then
+				print("[AutoDeflect] F pressed x"..count)
+			end
 		end
 		pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
+		print("[AutoDeflect] CLICKING STOPPED")
 	end)
 end
 
@@ -184,9 +191,15 @@ local function update()
 
 		if inRing and (approaching or veryClose) then
 			colorRing(myRing, RING_HOT)
+			if not clicking then
+				print("[AutoDeflect] BALL IN RING dist="..string.format("%.1f",dist).." speed="..string.format("%.1f",speed).." approaching="..tostring(approaching))
+			end
 			startClicking()
 		else
 			colorRing(myRing, RING_IDLE)
+			if clicking then
+				print("[AutoDeflect] Ball left ring")
+			end
 			stopClicking()
 		end
 	else
@@ -227,7 +240,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v17"
+title.Text="⬤  AUTO-HIT  v18"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
@@ -315,4 +328,4 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v17 loaded - F key deflect (works with console open)")
+print("[AutoDeflect] v18 debug - watching for ball and clicks")
