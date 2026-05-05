@@ -25,7 +25,7 @@ local plr              = Players.LocalPlayer
 
 local RADIUS    = 30
 local SEGMENTS  = 48
-local REFIRE_CD = 0.8
+local REFIRE_CD = 0.3
 local RING_IDLE = Color3.fromRGB(0, 180, 255)
 local RING_HOT  = Color3.fromRGB(255, 50, 50)
 local BALL_COL  = Color3.fromRGB(255, 200, 0)
@@ -106,11 +106,7 @@ local function fireDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- F key
-	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
-	task.wait(0.05)
-	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
-	-- Button click
+	-- Fire immediately, no wait - game handles its own cooldown
 	if deflectBtn then
 		pcall(function()
 			local conn=deflectBtn.MouseButton1Click:Connect(function() end)
@@ -118,6 +114,8 @@ local function fireDeflect()
 			deflectBtn.MouseButton1Click:Fire()
 		end)
 	end
+	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
+	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
 -- Main update
@@ -156,9 +154,10 @@ local function update()
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 
-	-- Fire when ball is in sweet spot: 3-9 studs away
-	-- Too close (0-2) = already hit, Too far (10+) = animation ends before ball arrives
-	local shouldFire = dist <= 9 and dist >= 2 and speed > 3
+	-- Fire when ball is moving and within range
+	-- Also fire when ball is fast and somewhat close (will arrive soon)
+	local shouldFire = (dist <= RADIUS and speed > 5)
+		or (dist <= 50 and speed > 80)  -- fast ball nearby, fire early
 
 	if shouldFire then
 		colorRing(myRing, RING_HOT)
@@ -208,7 +207,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v53"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v54"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
@@ -289,5 +288,5 @@ _G._AutoDeflectCleanup=function()
 	disable() pcall(gui.Destroy,gui) pcall(ringFolder.Destroy,ringFolder)
 end
 
-gui.Parent = plr.PlayerGui
-print("[AutoDeflect] v50 - sweet spot dist 2-9
+gui.Parent=plr.PlayerGui
+print("[AutoDeflect] v47 - no cooldown wait, fire instantly")
