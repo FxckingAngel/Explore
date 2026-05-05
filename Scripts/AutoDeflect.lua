@@ -32,7 +32,8 @@ local plr              = Players.LocalPlayer
 local RADIUS   = 15
 local SEGMENTS = 64
 local BAND     = 5
-local BALL_MIN_VEL = 15  -- min speed to count as ball in play
+local BALL_MIN_VEL = 15
+local SPAM_MODE = false  -- true = press as fast as possible (test mode)  -- min speed to count as ball in play
 
 local RING_IDLE = Color3.fromRGB(0, 180, 255)
 local RING_HOT  = Color3.fromRGB(255, 50, 50)
@@ -161,12 +162,17 @@ local function startClicking()
 	deflectBtn = getDeflectButton()
 	task.spawn(function()
 		while clicking and active do
-			local now = tick()
-			if now - lastDeflect >= DEFLECT_CD then
+			if SPAM_MODE then
 				pressDeflect()
-				lastDeflect = now
+				task.wait()
+			else
+				local now = tick()
+				if now - lastDeflect >= DEFLECT_CD then
+					pressDeflect()
+					lastDeflect = now
+				end
+				task.wait(0.03)
 			end
-			task.wait(0.03)
 		end
 	end)
 end
@@ -248,7 +254,7 @@ gui.Name="AutoDeflectUI" gui.ResetOnSpawn=false
 gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling gui.DisplayOrder=9999
 
 local frame = Instance.new("Frame", gui)
-frame.Size=UDim2.new(0,220,0,70) frame.Position=UDim2.new(0.5,-110,0,20)
+frame.Size=UDim2.new(0,220,0,86) frame.Position=UDim2.new(0.5,-110,0,20)
 frame.BackgroundColor3=Color3.fromRGB(12,12,12) frame.BorderSizePixel=0
 frame.Active=true
 Instance.new("UICorner",frame).CornerRadius=UDim.new(0,12)
@@ -257,7 +263,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v29"
+title.Text="⬤  AUTO-HIT  v30"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
@@ -270,10 +276,24 @@ sub.TextColor3=Color3.fromRGB(100,100,100) sub.BackgroundTransparency=1
 sub.Position=UDim2.new(0,12,0,28) sub.Size=UDim2.new(1,-24,0,14)
 sub.TextXAlignment=Enum.TextXAlignment.Left
 
+local spamBtn=Instance.new("TextButton",frame)
+spamBtn.Text="SPAM: OFF"
+spamBtn.Font=Enum.Font.GothamBold spamBtn.TextSize=10
+spamBtn.TextColor3=Color3.fromRGB(255,255,255)
+spamBtn.BackgroundColor3=Color3.fromRGB(60,20,20)
+spamBtn.BorderSizePixel=0 spamBtn.AutoButtonColor=false
+spamBtn.Position=UDim2.new(0,12,0,44) spamBtn.Size=UDim2.new(0,90,0,16)
+Instance.new("UICorner",spamBtn).CornerRadius=UDim.new(0,4)
+spamBtn.MouseButton1Click:Connect(function()
+	SPAM_MODE = not SPAM_MODE
+	spamBtn.Text = SPAM_MODE and "SPAM: ON ⚡" or "SPAM: OFF"
+	spamBtn.BackgroundColor3 = SPAM_MODE and Color3.fromRGB(180,20,20) or Color3.fromRGB(60,20,20)
+end)
+
 local ballStatus=Instance.new("TextLabel",frame)
 ballStatus.Font=Enum.Font.Gotham ballStatus.TextSize=10
 ballStatus.TextColor3=Color3.fromRGB(100,100,100) ballStatus.BackgroundTransparency=1
-ballStatus.Position=UDim2.new(0,12,0,44) ballStatus.Size=UDim2.new(1,-80,0,14)
+ballStatus.Position=UDim2.new(0,108,0,44) ballStatus.Size=UDim2.new(1,-80,0,14)
 ballStatus.TextXAlignment=Enum.TextXAlignment.Left
 
 local btn=Instance.new("TextButton",frame)
