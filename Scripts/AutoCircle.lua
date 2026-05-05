@@ -19,8 +19,16 @@ local TweenService     = game:GetService("TweenService")
 if _G._AutoCircleCleanup then
 	pcall(_G._AutoCircleCleanup)
 	_G._AutoCircleCleanup = nil
-	task.wait(0.1)
 end
+-- Remove old ring folder
+local oldFolder = workspace:FindFirstChild("_AutoCircle")
+if oldFolder then oldFolder:Destroy() end
+-- Remove old GUI
+for _, holder in pairs({game:GetService("CoreGui"), Players.LocalPlayer.PlayerGui}) do
+	local old = holder:FindFirstChild("AutoCircleUI")
+	if old then old:Destroy() end
+end
+task.wait(0.15)
 
 local plr = Players.LocalPlayer
 
@@ -372,15 +380,16 @@ local function update()
 		end
 	end
 
-	-- Check if ball is in your ring
+	-- Check if ball is in your ring AND actually moving
 	if ball and ball.Parent then
 		local flatDist = Vector3.new(
 			ball.Position.X - origin.X,
 			0,
 			ball.Position.Z - origin.Z
 		).Magnitude
+		local ballSpeed = ball.AssemblyLinearVelocity.Magnitude
 
-		if flatDist <= RADIUS + BAND then
+		if flatDist <= RADIUS + BAND and ballSpeed >= BALL_MIN_VELOCITY then
 			colorRing(myRing, RING_HOT)
 			triggerF(ball)
 		else
@@ -551,7 +560,7 @@ _G._AutoCircleCleanup = function()
 	pcall(ringFolder.Destroy, ringFolder)
 end
 
-print("[AutoCircle] Deathball Auto-Hit loaded.")
+print("[AutoCircle] v8 loaded - Mouse1 click, direct path ball lookup")
 print("[AutoCircle] Click ON — blue ring = your zone, yellow ring = ball tracking")
 print("[AutoCircle] Ball enters your ring -> F triggered instantly")
 
