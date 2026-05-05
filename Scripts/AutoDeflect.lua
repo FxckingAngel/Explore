@@ -157,25 +157,25 @@ local function pressDeflect()
 end
 
 local lastFired = 0
-local REFIRE_CD = 0.5  -- won't fire again within this window
+local REFIRE_CD = 0.8
 
 local function startClicking()
 	local now = tick()
 	if now - lastFired < REFIRE_CD then return end
 	lastFired = now
 	deflectBtn = getDeflectButton()
-	-- 3 rapid presses the moment ball is detected in ring
 	task.spawn(function()
-		pressDeflect()
-		task.wait(0.06)
-		pressDeflect()
-		task.wait(0.06)
-		pressDeflect()
+		-- Rapid fire as soon as ball detected
+		for i = 1, 5 do
+			pressDeflect()
+			task.wait(0.04)
+		end
 	end)
 end
 
 local function stopClicking()
 	clicking = false
+	colorRing(myRing, RING_IDLE)
 end
 
 
@@ -260,7 +260,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v33"
+title.Text="⬤  AUTO-HIT  v34"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
