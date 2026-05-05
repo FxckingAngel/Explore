@@ -387,9 +387,7 @@ local function update()
 			0,
 			ball.Position.Z - origin.Z
 		).Magnitude
-		local ballSpeed = ball.AssemblyLinearVelocity.Magnitude
-
-		if flatDist <= RADIUS + BAND and ballSpeed >= BALL_MIN_VELOCITY then
+		if flatDist <= RADIUS + BAND then
 			colorRing(myRing, RING_HOT)
 			triggerF(ball)
 		else
