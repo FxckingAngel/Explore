@@ -165,10 +165,13 @@ local function update()
 
 	local speed = ball.AssemblyLinearVelocity.Magnitude
 
-	-- Fire when ball is moving and within range
-	-- Also fire when ball is fast and somewhat close (will arrive soon)
-	local shouldFire = (dist <= RADIUS and speed > 5)
-		or (dist <= 50 and speed > 80)  -- fast ball nearby, fire early
+	-- Predict time until ball reaches sword range (5 studs)
+	-- Fire F that many milliseconds from now
+	local SWORD_RANGE = 5  -- studs where sword hits ball
+	local timeToArrival = speed > 1 and (dist - SWORD_RANGE) / speed or 999
+
+	-- Fire when ball is ~150ms away from sword range
+	local shouldFire = timeToArrival <= 0.15 and timeToArrival >= 0 and speed > 5
 
 	if shouldFire then
 		colorRing(myRing, RING_HOT)
@@ -218,7 +221,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-DEFLECT  v48"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
+title.Text="⬤  AUTO-DEFLECT  v49"title.Font=Enum.Font.GothamBold title.TextSize=12 title.TextColor3=RING_IDLE
 title.BackgroundTransparency=1 title.Position=UDim2.new(0,12,0,8)
 title.Size=UDim2.new(1,-80,0,16) title.TextXAlignment=Enum.TextXAlignment.Left
 
