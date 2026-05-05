@@ -345,8 +345,32 @@ local function getRoot()
 	return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChildWhichIsA("BasePart"))
 end
 
-local cachedBall = nil
+local cachedBall    = nil
 local ballSearchTick = 0
+
+-- Pre-cache ball instantly using ChildAdded (no polling lag)
+local function watchFX(fx)
+	local rock = fx:FindFirstChild("RockTemplate")
+	if rock then cachedBall = rock end
+	fx.ChildAdded:Connect(function(child)
+		if child.Name == "RockTemplate" then
+			cachedBall = child
+			if DEBUG then print("[AutoCircle] Ball appeared") end
+		end
+	end)
+	fx.ChildRemoved:Connect(function(child)
+		if child.Name == "RockTemplate" and cachedBall == child then
+			cachedBall = nil
+		end
+	end)
+end
+
+local _fx = workspace:FindFirstChild("FX")
+if _fx then watchFX(_fx) end
+workspace.ChildAdded:Connect(function(c)
+	if c.Name == "FX" then watchFX(c) end
+end)
+
 
 local function update()
 	local root = getRoot()
@@ -455,7 +479,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  DEATHBALL AUTO-HIT  v9"
+title.Text             = "⬤  DEATHBALL AUTO-HIT  v10"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
