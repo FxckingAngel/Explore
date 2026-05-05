@@ -490,7 +490,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  DEATHBALL AUTO-HIT  v10"
+title.Text             = "⬤  AUTO-HIT  v12"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
