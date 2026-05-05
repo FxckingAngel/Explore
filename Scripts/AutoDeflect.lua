@@ -206,7 +206,7 @@ local function update()
 		local dist = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z).Magnitude
 		local ballSpeed = ball.AssemblyLinearVelocity.Magnitude
 		-- Only trigger on fast-moving ball (not a player walking through)
-		if dist <= RADIUS + BAND and ballSpeed >= BALL_MIN_VEL then
+		if dist <= RADIUS + BAND then
 			colorRing(myRing, RING_HOT)
 			startClicking()
 		else
@@ -251,7 +251,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v22"
+title.Text="⬤  AUTO-HIT  v23"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
