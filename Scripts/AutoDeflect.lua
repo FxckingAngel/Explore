@@ -1,308 +1,110 @@
 --[[
-	AutoDeflect — Deathball Auto-Hit
+	AutoDeflect v16 — Deathball Auto-Hit
 	FxckingAngel/Explore
 
-	Draws a 30-stud ring around your character.
-	When the Deathball enters your ring, auto-triggers F instantly.
-	The ball also gets its own tracking ring so you can see it.
-	
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/refs/heads/main/Scripts/AutoDeflect.lua?v=" .. tostring(math.random(1,999999))))()
+	Detects Workspace.FX.RockTemplate (the ball) via ChildAdded.
+	When ball enters your 10-stud ring, continuously clicks Mouse1
+	until ball leaves. Console must be CLOSED for clicks to work.
+
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/FxckingAngel/Explore/main/Scripts/Load.lua"))()
 ]]
 
--- ── Kill previous instance ───────────────────────────────────────────────────
+-- Kill old instance
+if _G._AutoDeflectCleanup then pcall(_G._AutoDeflectCleanup) _G._AutoDeflectCleanup = nil end
+do
+	local old = workspace:FindFirstChild("_AutoDeflect")
+	if old then old:Destroy() end
+	for _, h in pairs({game:GetService("CoreGui"), game:GetService("Players").LocalPlayer.PlayerGui}) do
+		local g = h:FindFirstChild("AutoDeflectUI")
+		if g then g:Destroy() end
+	end
+end
+task.wait(0.1)
+
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
-
--- Stop any previously running AutoDeflect
-if _G._AutoDeflectCleanup then
-	pcall(_G._AutoDeflectCleanup)
-	_G._AutoDeflectCleanup = nil
-end
--- Remove old ring folder
-local oldFolder = workspace:FindFirstChild("_AutoDeflect")
-if oldFolder then oldFolder:Destroy() end
--- Remove old GUI
-for _, holder in pairs({game:GetService("CoreGui"), Players.LocalPlayer.PlayerGui}) do
-	local old = holder:FindFirstChild("AutoDeflectUI")
-	if old then old:Destroy() end
-end
-task.wait(0.15)
-
-local plr = Players.LocalPlayer
+local VIM              = game:GetService("VirtualInputManager")
+local plr              = Players.LocalPlayer
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local RADIUS       = 10     -- your detection ring radius (studs)
-local SEGMENTS     = 64     -- ring smoothness
-local BAND         = 4      -- extra tolerance (radius ± studs)
-local COOLDOWN     = 1.5    -- min seconds between triggers on same ball
-local DEBUG        = false   -- print what gets triggered
+local RADIUS   = 10
+local SEGMENTS = 64
+local BAND     = 5
+local BALL_MIN_VEL = 15  -- min speed to count as ball in play
 
--- Colors
-local RING_IDLE    = Color3.fromRGB(0, 180, 255)
-local RING_HOT     = Color3.fromRGB(255, 50, 50)
-local BALL_RING_C  = Color3.fromRGB(255, 200, 0)
-
--- ── Human Logic ───────────────────────────────────────────────────────────────
--- Deathball context:
---   - Ball gets FASTER every hit (pressure builds)
---   - Player moves themselves (no movement injection)
---   - Reaction must tighten as ball speeds up (or you die)
---   - Occasional late/miss is human — but less so at high speed (panic mode)
---   - Fatigue: long rallies make you slightly slower then you recover
-local HUMAN = {
-	-- Reaction time at LOW ball speed
-	ReactionSlow    = {min=0.08, max=0.15},
-
-	-- Reaction time at HIGH ball speed (panic)
-	PanicSpeed      = 80,
-	ReactionFast    = {min=0.05, max=0.10},
-
-	-- Miss chance at low speed (8%) — drops toward 0 as ball gets fast
-	-- At panic speed: miss chance = 0 (you HAVE to hit it)
-	MissChanceSlow  = 0.08,
-
-	-- Jitter: tiny random noise on each reaction (feels organic)
-	JitterMax       = 0.05,
-
-	-- Fatigue: builds over a long rally, slightly slows reaction
-	FatiguePerHit   = 0.003,   -- adds ~3ms per hit
-	FatigueMax      = 0.06,    -- cap at +60ms
-	FatigueDecay    = 0.002,   -- recovers 2ms per second idle
-
-	-- Post-hit ignore: don't re-trigger immediately after a hit
-	PostHitIgnore   = 0.35,
-}
-
--- ── Human State ───────────────────────────────────────────────────────────────
-local humanState = {
-	fatigue     = 0,
-	hitCount    = 0,
-	lastHitTime = 0,
-	postIgnore  = 0,
-	pending     = false,
-}
-
-local function rng(min, max)
-	return min + math.random() * (max - min)
-end
-
-local function getReactionTime(ballSpeed)
-	-- Lerp between slow and fast reaction based on ball speed
-	local t = math.clamp((ballSpeed - 20) / (HUMAN.PanicSpeed - 20), 0, 1)
-	local rMin = HUMAN.ReactionSlow.min + (HUMAN.ReactionFast.min - HUMAN.ReactionSlow.min) * t
-	local rMax = HUMAN.ReactionSlow.max + (HUMAN.ReactionFast.max - HUMAN.ReactionSlow.max) * t
-	local reaction = rng(rMin, rMax)
-
-	-- Add jitter (organic micro-variance)
-	reaction = reaction + rng(0, HUMAN.JitterMax)
-
-	-- Add fatigue
-	reaction = reaction + humanState.fatigue
-
-	return reaction
-end
-
-local function getMissChance(ballSpeed)
-	-- Miss chance shrinks as ball gets faster — panic = no misses
-	local t = math.clamp((ballSpeed - 20) / (HUMAN.PanicSpeed - 20), 0, 1)
-	return HUMAN.MissChanceSlow * (1 - t)
-end
-
--- ── Ball detection ────────────────────────────────────────────────────────────
--- Deathball game: ball is usually named "Ball", "DeathBall", "Sphere" etc
--- We detect it by: spherical shape, unanchored, moving, NOT a player part
--- EXPLICIT exclusions — never treat these as the ball
-local NEVER_BALL = {
-	"sword","blade","katana","weapon","tool","handle","rock","stone",
-	"rocktemplate","template","debris","shard","fragment","part",
-	"hitbox","hurtbox","damagebox","effect","vfx","particle",
-	"baseplate","platform","spawn","map","floor","wall","ceiling",
-	"humanoidrootpart","rootpart","head","torso","arm","leg","hand",
-	"foot","leftarm","rightarm","leftleg","rightleg","upperbody","lowerbody",
-}
-
-local function isExcluded(name)
-	name = name:lower()
-	for _, n in pairs(NEVER_BALL) do
-		if name == n or name:find(n, 1, true) then return true end
-	end
-	return false
-end
-
-local function isPlayerPart(obj)
-	for _, p in pairs(Players:GetPlayers()) do
-		local c = p.Character
-		if c and obj:IsDescendantOf(c) then return true end
-	end
-	return false
-end
-
--- The actual ball in this Deathball game:
---   mesh = FileMesh (custom ball mesh)
---   shape = Block (Roblox default)
---   parent = SwordWelds (game groups it with sword data)
---   name = "Sword" (confusingly named, but it IS the ball)
---   velocity = very high (174 studs/s seen)
---   size = ~0.83 x 4.37 x 0.26 (custom mesh, underlying part is small)
---
--- Strategy: detect by FileMesh + high velocity + NOT a player part
--- We lock onto the FASTEST non-player moving object as the ball
-
--- In Deathball, the ball is a Sword inside SwordWelds inside a player model.
--- When it's IN FLIGHT (just hit), it moves at 100-200+ studs/s.
--- When a player is HOLDING it, velocity is low (~25 studs/s walking speed).
--- We detect it by: name="Sword", parent.Name="SwordWelds", velocity > 80 studs/s
--- 80 studs/s threshold: fast enough to be a thrown/hit ball, not someone walking
-
--- CONFIRMED: ball = Workspace.FX.RockTemplate
--- Evidence from live velocity spike tracking:
---   hit 1: vel=42.4  spike=+42.4
---   hit 2: vel=71.9  spike=+36.6  (faster each hit)
---   hit 3: vel=122.5 spike=+57.6  (keeps accelerating)
--- All other objects spike at fixed intervals (40, 80) = UI sync, not physics
--- RockTemplate is the ONLY object with irregular spikes + increasing velocity
-
--- Velocity threshold: ball starts at ~40 studs/s, ignore when stationary (~0)
-local BALL_MIN_VELOCITY = 20
-
-local function looksLikeBall(obj)
-	if not obj:IsA("BasePart") then return false end
-	if obj.Anchored then return false end
-
-	-- Exact match: RockTemplate in FX
-	if obj.Name == "RockTemplate"
-	and obj.Parent
-	and obj.Parent.Name == "FX"
-	and obj.AssemblyLinearVelocity.Magnitude >= BALL_MIN_VELOCITY then
-		return true
-	end
-
-	return false
-end
-
--- Find ball — check direct path first (fast), then scan
-local function findBall()
-	-- Direct path: Workspace.FX.RockTemplate
-	local fx = workspace:FindFirstChild("FX")
-	if fx then
-		local rock = fx:FindFirstChild("RockTemplate")
-		if rock and looksLikeBall(rock) then
-			if rock ~= lockedBall and DEBUG then
-				print("[AutoDeflect] Locked: " .. rock:GetFullName()
-					.. " vel=" .. string.format("%.1f", rock.AssemblyLinearVelocity.Magnitude))
-			end
-			lockedBall = rock
-			return rock
-		end
-	end
-
-	-- Fallback: scan FX folder only (much faster than GetDescendants)
-	if fx then
-		for _, obj in pairs(fx:GetChildren()) do
-			if looksLikeBall(obj) then
-				lockedBall = obj
-				if DEBUG then
-					print("[AutoDeflect] Locked (fallback): " .. obj:GetFullName())
-				end
-				return obj
-			end
-		end
-	end
-
-	lockedBall = nil
-	return nil
-end
-
--- lockedBall declared before looksLikeBall (used inside it)
-local lockedBall = nil
+local RING_IDLE = Color3.fromRGB(0, 180, 255)
+local RING_HOT  = Color3.fromRGB(255, 50, 50)
+local BALL_COL  = Color3.fromRGB(255, 200, 0)
 
 -- ── State ─────────────────────────────────────────────────────────────────────
 local active      = false
-local myRing      = {}      -- your detection ring parts
-local ballRing    = {}      -- ball tracking ring parts
-local lastTrigger = 0
+local myRing      = {}
+local ballRing    = {}
+local cachedBall  = nil
+local clicking    = false
 local renderConn  = nil
+local clickConn   = nil
 
 local ringFolder  = Instance.new("Folder")
 ringFolder.Name   = "_AutoDeflect"
 ringFolder.Parent = workspace
 
 -- ── Ring ──────────────────────────────────────────────────────────────────────
-local function makeRing(radius, color, height)
+local function makeRing(radius, color)
 	local parts = {}
 	local step  = (2 * math.pi) / SEGMENTS
 	for i = 0, SEGMENTS - 1 do
 		local a  = i * step
-		local b  = (i + 1) * step
+		local b  = (i+1) * step
 		local ax, az = math.cos(a), math.sin(a)
 		local bx, bz = math.cos(b), math.sin(b)
-		local cx, cz = (ax+bx)/2, (az+bz)/2
-		local len = Vector3.new((bx-ax)*radius, 0, (bz-az)*radius).Magnitude
+		local cx2, cz = (ax+bx)/2, (az+bz)/2
+		local len = Vector3.new((bx-ax)*radius,0,(bz-az)*radius).Magnitude
 		local p = Instance.new("Part")
-		p.Anchored     = true
-		p.CanCollide   = false
-		p.CanQuery     = false
-		p.CanTouch     = false
-		p.CastShadow   = false
-		p.Size         = Vector3.new(len+0.05, height or 0.3, 0.3)
-		p.Color        = color
-		p.Material     = Enum.Material.Neon
-		p.Transparency = 0.2
-		p.Parent       = ringFolder
-		parts[i+1]     = p
+		p.Anchored=true p.CanCollide=false p.CanQuery=false
+		p.CanTouch=false p.CastShadow=false
+		p.Size=Vector3.new(len+0.05,0.3,0.3)
+		p.Color=color p.Material=Enum.Material.Neon
+		p.Transparency=0.2 p.Parent=ringFolder
+		parts[i+1]=p
 	end
 	return parts
 end
 
-local function positionRing(parts, origin, radius, yOff)
-	local step = (2 * math.pi) / SEGMENTS
-	for i, p in pairs(parts) do
-		local a  = (i-1)*step
-		local b  = i*step
-		local ax, az = math.cos(a), math.sin(a)
-		local bx, bz = math.cos(b), math.sin(b)
-		local cx, cz = (ax+bx)/2, (az+bz)/2
-		p.CFrame = CFrame.new(
-			origin.X + cx*radius,
-			origin.Y + (yOff or 0),
-			origin.Z + cz*radius
-		) * CFrame.Angles(0, -math.atan2(bz-az, bx-ax), 0)
+local function posRing(parts, origin, radius)
+	local step = (2*math.pi)/SEGMENTS
+	for i,p in pairs(parts) do
+		local a=(i-1)*step local b=i*step
+		local ax,az=math.cos(a),math.sin(a)
+		local bx,bz=math.cos(b),math.sin(b)
+		local cx2,cz=(ax+bx)/2,(az+bz)/2
+		p.CFrame=CFrame.new(origin.X+cx2*radius,origin.Y,origin.Z+cz*radius)
+			*CFrame.Angles(0,-math.atan2(bz-az,bx-ax),0)
 	end
 end
 
 local function colorRing(parts, col)
-	for _, p in pairs(parts) do p.Color = col end
+	for _,p in pairs(parts) do p.Color=col end
 end
 
 local function destroyRing(parts)
-	for _, p in pairs(parts) do pcall(p.Destroy, p) end
+	for _,p in pairs(parts) do pcall(p.Destroy,p) end
 end
 
--- ── Trigger ───────────────────────────────────────────────────────────────────
--- ── Helpers ───────────────────────────────────────────────────────────────────
 local function getRoot()
-	local c = plr.Character
+	local c=plr.Character
 	return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChildWhichIsA("BasePart"))
 end
 
-local cachedBall    = nil
-local ballSearchTick = 0
-
--- Pre-cache ball instantly using ChildAdded (no polling lag)
-local lastBallAppear = 0
+-- ── Ball detection via ChildAdded ─────────────────────────────────────────────
 local function watchFX(fx)
 	local rock = fx:FindFirstChild("RockTemplate")
 	if rock then cachedBall = rock end
 	fx.ChildAdded:Connect(function(child)
 		if child.Name == "RockTemplate" then
 			cachedBall = child
-			local now = tick()
-			if now - lastBallAppear > 2 then
-				lastBallAppear = now
-				if DEBUG then print("[AutoDeflect] Ball in play") end
-			end
 		end
 	end)
 	fx.ChildRemoved:Connect(function(child)
@@ -318,214 +120,153 @@ workspace.ChildAdded:Connect(function(c)
 	if c.Name == "FX" then watchFX(c) end
 end)
 
+-- ── Click loop ────────────────────────────────────────────────────────────────
+local function startClicking()
+	if clicking then return end
+	clicking = true
+	task.spawn(function()
+		local cx = workspace.CurrentCamera.ViewportSize.X / 2
+		local cy = workspace.CurrentCamera.ViewportSize.Y / 2
+		while clicking and active do
+			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
+			task.wait(0.08)
+			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+			task.wait(0.12)
+		end
+		-- Release on stop
+		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+	end)
+end
 
+local function stopClicking()
+	clicking = false
+end
+
+-- ── Main update ───────────────────────────────────────────────────────────────
 local function update()
 	local root = getRoot()
 	if not root then return end
 	local origin = root.Position
 
-	-- Reposition your ring
-	positionRing(myRing, origin, RADIUS)
+	-- Position your ring
+	posRing(myRing, origin, RADIUS)
 
-	-- Find ball — check cached first, re-search every 0.5s only if lost
-	local now = tick()
+	-- Fallback ball search every 0.5s
 	if not cachedBall or not cachedBall.Parent then
-		if now - ballSearchTick > 0.5 then
-			cachedBall = findBall()
-			ballSearchTick = now
+		local fx = workspace:FindFirstChild("FX")
+		if fx then
+			local rock = fx:FindFirstChild("RockTemplate")
+			if rock then cachedBall = rock end
 		end
 	end
+
 	local ball = cachedBall
 
-	-- Reposition ball ring
+	-- Position ball ring
 	if ball and ball.Parent then
 		if #ballRing == 0 then
-			ballRing = makeRing(ball.Size.Magnitude * 0.8, BALL_RING_C, 0.25)
+			ballRing = makeRing(3, BALL_COL)
 		end
-		local ballOrigin = Vector3.new(ball.Position.X, root.Position.Y, ball.Position.Z)
-		positionRing(ballRing, ballOrigin, ball.Size.Magnitude * 0.8)
-	else
-		if #ballRing > 0 then
-			destroyRing(ballRing)
-			ballRing = {}
-		end
+		posRing(ballRing, Vector3.new(ball.Position.X, origin.Y, ball.Position.Z), 3)
+	elseif #ballRing > 0 then
+		destroyRing(ballRing) ballRing = {}
 	end
 
-	-- Trigger when ball is in ring AND approaching (before it hits)
+	-- Check if ball in ring and approaching
 	if ball and ball.Parent then
-		local toPlayer    = Vector3.new(origin.X - ball.Position.X, 0, origin.Z - ball.Position.Z)
-		local flatDist    = toPlayer.Magnitude
-		local ballSpeed   = ball.AssemblyLinearVelocity.Magnitude
-		local ballVelFlat = Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z)
+		local toPlayer = Vector3.new(origin.X-ball.Position.X, 0, origin.Z-ball.Position.Z)
+		local dist     = toPlayer.Magnitude
+		local speed    = ball.AssemblyLinearVelocity.Magnitude
+		local velFlat  = Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z)
 
-		-- Is ball heading toward us?
-		local approaching = false
-		if ballVelFlat.Magnitude > 1 and flatDist > 0 then
-			approaching = ballVelFlat.Unit:Dot(toPlayer.Unit) > 0.2
-		end
+		local approaching = speed >= BALL_MIN_VEL and velFlat.Magnitude > 0.5
+			and velFlat.Unit:Dot(toPlayer.Unit) > 0.1
 
-		-- Hit if approaching fast, OR ball is almost on top of us
-		local inRing  = flatDist <= RADIUS + BAND
-		local veryClose = flatDist <= RADIUS * 0.5
-		local fastIncoming = inRing and approaching and ballSpeed >= BALL_MIN_VELOCITY
+		local inRing    = dist <= RADIUS + BAND
+		local veryClose = dist <= RADIUS * 0.5
 
-		if fastIncoming or veryClose then
+		if inRing and (approaching or veryClose) then
 			colorRing(myRing, RING_HOT)
-			triggerF(ball)
+			startClicking()
 		else
 			colorRing(myRing, RING_IDLE)
+			stopClicking()
 		end
 	else
 		colorRing(myRing, RING_IDLE)
+		stopClicking()
 	end
 end
 
 -- ── Enable / Disable ──────────────────────────────────────────────────────────
 local function enable()
 	if active then return end
-	active     = true
-	cachedBall = nil
-	myRing     = makeRing(RADIUS, RING_IDLE)
-
-	-- Ring visual update (separate from click loop)
-	renderConn = RunService.RenderStepped:Connect(function()
-		local root = getRoot()
-		if not root then return end
-		positionRing(myRing, root.Position, RADIUS)
-		if cachedBall and cachedBall.Parent then
-			if #ballRing == 0 then
-				ballRing = makeRing(RADIUS * 0.3, BALL_RING_C, 0.2)
-			end
-			positionRing(ballRing, cachedBall.Position, RADIUS * 0.3)
-		end
-	end)
-
-	-- Simple click loop — same pattern as working manual test
-	task.spawn(function()
-		local VIM = game:GetService("VirtualInputManager")
-		local cx = workspace.CurrentCamera.ViewportSize.X / 2
-		local cy = workspace.CurrentCamera.ViewportSize.Y / 2
-
-		while active do
-			local root = getRoot()
-			local ball = cachedBall
-
-			if root and ball and ball.Parent then
-				local dist = (Vector3.new(ball.Position.X, root.Position.Y, ball.Position.Z) - root.Position).Magnitude
-				local vel  = ball.AssemblyLinearVelocity.Magnitude
-				local toPlayer = Vector3.new(root.Position.X - ball.Position.X, 0, root.Position.Z - ball.Position.Z)
-				local approaching = vel > BALL_MIN_VELOCITY and
-					Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z).Magnitude > 1 and
-					Vector3.new(ball.AssemblyLinearVelocity.X, 0, ball.AssemblyLinearVelocity.Z).Unit:Dot(toPlayer.Unit) > 0.2
-
-				if dist <= RADIUS + BAND and approaching then
-					colorRing(myRing, RING_HOT)
-					-- Click — same timing as working manual test
-					VIM:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
-					task.wait(0.08)
-					VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-					task.wait(0.15)
-				else
-					colorRing(myRing, RING_IDLE)
-					task.wait(1/60)
-				end
-			else
-				colorRing(myRing, RING_IDLE)
-				task.wait(1/60)
-			end
-		end
-	end)
+	active = true
+	myRing = makeRing(RADIUS, RING_IDLE)
+	renderConn = RunService.Heartbeat:Connect(update)
 end
 
 local function disable()
 	if not active then return end
 	active = false
+	stopClicking()
 	if renderConn then renderConn:Disconnect() renderConn = nil end
 	destroyRing(myRing) myRing = {}
 	destroyRing(ballRing) ballRing = {}
-	cachedBall = nil
 end
 
 -- ── UI ────────────────────────────────────────────────────────────────────────
--- Clean up old instance
-for _, holder in pairs({game:GetService("CoreGui"), plr.PlayerGui}) do
-	local old = holder:FindFirstChild("AutoDeflectUI")
-	if old then old:Destroy() end
-end
-
 local gui = Instance.new("ScreenGui")
-gui.Name          = "AutoDeflectUI"
-gui.ResetOnSpawn  = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.DisplayOrder  = 9999
+gui.Name="AutoDeflectUI" gui.ResetOnSpawn=false
+gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling gui.DisplayOrder=9999
 
 local frame = Instance.new("Frame", gui)
-frame.Size             = UDim2.new(0, 210, 0, 90)
-frame.Position         = UDim2.new(0.5, -105, 0, 20)
-frame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
-frame.BorderSizePixel  = 0
-frame.Active           = true
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+frame.Size=UDim2.new(0,220,0,70) frame.Position=UDim2.new(0.5,-110,0,20)
+frame.BackgroundColor3=Color3.fromRGB(12,12,12) frame.BorderSizePixel=0
+frame.Active=true
+Instance.new("UICorner",frame).CornerRadius=UDim.new(0,12)
 
-local stroke = Instance.new("UIStroke", frame)
-stroke.Color     = RING_IDLE
-stroke.Thickness = 1.5
+local stroke=Instance.new("UIStroke",frame)
+stroke.Color=RING_IDLE stroke.Thickness=1.5
 
-local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  AUTO-HIT  v16"
-title.Font             = Enum.Font.GothamBold
-title.TextSize         = 12
-title.TextColor3       = RING_IDLE
-title.BackgroundTransparency = 1
-title.Position         = UDim2.new(0, 12, 0, 8)
-title.Size             = UDim2.new(1, -24, 0, 16)
-title.TextXAlignment   = Enum.TextXAlignment.Left
+local title=Instance.new("TextLabel",frame)
+title.Text="⬤  AUTO-HIT  v16"
+title.Font=Enum.Font.GothamBold title.TextSize=13
+title.TextColor3=RING_IDLE title.BackgroundTransparency=1
+title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
+title.TextXAlignment=Enum.TextXAlignment.Left
 
-local sub = Instance.new("TextLabel", frame)
-sub.Text             = "Ring: " .. RADIUS .. " studs  |  Auto-hits ball on contact"
-sub.Font             = Enum.Font.Gotham
-sub.TextSize         = 10
-sub.TextColor3       = Color3.fromRGB(100, 100, 100)
-sub.BackgroundTransparency = 1
-sub.Position         = UDim2.new(0, 12, 0, 26)
-sub.Size             = UDim2.new(1, -24, 0, 14)
-sub.TextXAlignment   = Enum.TextXAlignment.Left
+local sub=Instance.new("TextLabel",frame)
+sub.Text="Ring: "..RADIUS.." studs  |  Auto-hits ball"
+sub.Font=Enum.Font.Gotham sub.TextSize=10
+sub.TextColor3=Color3.fromRGB(100,100,100) sub.BackgroundTransparency=1
+sub.Position=UDim2.new(0,12,0,28) sub.Size=UDim2.new(1,-24,0,14)
+sub.TextXAlignment=Enum.TextXAlignment.Left
 
-local ballStatus = Instance.new("TextLabel", frame)
-ballStatus.Text             = "Ball: searching..."
-ballStatus.Font             = Enum.Font.Gotham
-ballStatus.TextSize         = 10
-ballStatus.TextColor3       = Color3.fromRGB(120, 120, 120)
-ballStatus.BackgroundTransparency = 1
-ballStatus.Position         = UDim2.new(0, 12, 0, 42)
-ballStatus.Size             = UDim2.new(1, -24, 0, 14)
-ballStatus.TextXAlignment   = Enum.TextXAlignment.Left
+local ballStatus=Instance.new("TextLabel",frame)
+ballStatus.Font=Enum.Font.Gotham ballStatus.TextSize=10
+ballStatus.TextColor3=Color3.fromRGB(100,100,100) ballStatus.BackgroundTransparency=1
+ballStatus.Position=UDim2.new(0,12,0,44) ballStatus.Size=UDim2.new(1,-80,0,14)
+ballStatus.TextXAlignment=Enum.TextXAlignment.Left
 
-local btn = Instance.new("TextButton", frame)
-btn.Text             = "OFF"
-btn.Font             = Enum.Font.GothamBold
-btn.TextSize         = 13
-btn.TextColor3       = Color3.fromRGB(255,255,255)
-btn.BackgroundColor3 = Color3.fromRGB(45,45,45)
-btn.BorderSizePixel  = 0
-btn.AutoButtonColor  = false
-btn.Position         = UDim2.new(1,-74, 0.5,-16)
-btn.Size             = UDim2.new(0,62,0,32)
-Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+local btn=Instance.new("TextButton",frame)
+btn.Text="OFF" btn.Font=Enum.Font.GothamBold btn.TextSize=13
+btn.TextColor3=Color3.fromRGB(255,255,255)
+btn.BackgroundColor3=Color3.fromRGB(45,45,45)
+btn.BorderSizePixel=0 btn.AutoButtonColor=false
+btn.Position=UDim2.new(1,-72,0.5,-16) btn.Size=UDim2.new(0,60,0,32)
+Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
 
-local ti = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
-
+local ti=TweenInfo.new(0.15,Enum.EasingStyle.Quad)
 local function updateBtn()
 	if active then
-		TweenService:Create(btn,   ti, {BackgroundColor3=Color3.fromRGB(0,160,80)}):Play()
-		TweenService:Create(stroke,ti, {Color=RING_HOT}):Play()
-		TweenService:Create(title, ti, {TextColor3=RING_HOT}):Play()
-		btn.Text = "ON"
+		TweenService:Create(btn,ti,{BackgroundColor3=Color3.fromRGB(0,160,80)}):Play()
+		TweenService:Create(stroke,ti,{Color=RING_HOT}):Play()
+		btn.Text="ON"
 	else
-		TweenService:Create(btn,   ti, {BackgroundColor3=Color3.fromRGB(45,45,45)}):Play()
-		TweenService:Create(stroke,ti, {Color=RING_IDLE}):Play()
-		TweenService:Create(title, ti, {TextColor3=RING_IDLE}):Play()
-		btn.Text = "OFF"
+		TweenService:Create(btn,ti,{BackgroundColor3=Color3.fromRGB(45,45,45)}):Play()
+		TweenService:Create(stroke,ti,{Color=RING_IDLE}):Play()
+		btn.Text="OFF"
 	end
 end
 
@@ -533,76 +274,48 @@ btn.MouseButton1Click:Connect(function()
 	if active then disable() else enable() end
 	updateBtn()
 end)
-btn.MouseEnter:Connect(function()
-	TweenService:Create(btn,ti,{BackgroundColor3=active and Color3.fromRGB(0,200,100) or Color3.fromRGB(65,65,65)}):Play()
-end)
-btn.MouseLeave:Connect(function()
-	TweenService:Create(btn,ti,{BackgroundColor3=active and Color3.fromRGB(0,160,80) or Color3.fromRGB(45,45,45)}):Play()
-end)
 
--- Update ball status label
+-- Ball status label
 RunService.Heartbeat:Connect(function()
-	if not active then return end
+	if not active then ballStatus.Text="Ball: off" return end
 	if cachedBall and cachedBall.Parent then
-		ballStatus.Text      = "Ball: " .. cachedBall.Name .. " ✓"
-		ballStatus.TextColor3 = Color3.fromRGB(0,200,100)
+		local spd=cachedBall.AssemblyLinearVelocity.Magnitude
+		ballStatus.Text=string.format("Ball: %.0f s/s %s", spd, clicking and "● CLICKING" or "")
+		ballStatus.TextColor3=clicking and Color3.fromRGB(255,80,80) or Color3.fromRGB(0,200,100)
 	else
-		ballStatus.Text       = "Ball: searching..."
-		ballStatus.TextColor3 = Color3.fromRGB(180,100,0)
+		ballStatus.Text="Ball: searching..."
+		ballStatus.TextColor3=Color3.fromRGB(180,100,0)
 	end
 end)
 
 -- Drag
-local dragging, dragStart, startPos
+local drag,ds,sp
 frame.InputBegan:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging=true dragStart=i.Position startPos=frame.Position
-	end
+	if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true ds=i.Position sp=frame.Position end
 end)
 UserInputService.InputChanged:Connect(function(i)
-	if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
-		local d=i.Position-dragStart
-		frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+	if drag and i.UserInputType==Enum.UserInputType.MouseMovement then
+		local d=i.Position-ds
+		frame.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
 	end
 end)
 UserInputService.InputEnded:Connect(function(i)
-	if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+	if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end
 end)
 
 -- Respawn
 plr.CharacterAdded:Connect(function()
-	if active then
-		disable() task.wait(1) enable() updateBtn()
-	end
+	if active then disable() task.wait(1) enable() updateBtn() end
 end)
 
-local ok = pcall(function() game:GetService("CoreGui"):GetFullName() end)
-gui.Parent = ok and game:GetService("CoreGui") or plr.PlayerGui
-
--- Register cleanup so re-running kills this instance
+-- Register cleanup
 _G._AutoDeflectCleanup = function()
 	disable()
-	pcall(gui.Destroy, gui)
-	pcall(ringFolder.Destroy, ringFolder)
+	pcall(gui.Destroy,gui)
+	pcall(ringFolder.Destroy,ringFolder)
 end
 
-print("[AutoDeflect] v16 loaded - simple while loop same as working test")
-print("[AutoDeflect] Click ON — blue ring = your zone, yellow ring = ball tracking")
-print("[AutoDeflect] Ball enters your ring -> F triggered instantly")
+local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
+gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
---[[
-DIAGNOSTIC: run this separately to find the hit remote
-paste in executor while playing, then hit the ball manually:
-
-local oldFS = RemoteEvent.FireServer
-hookfunction(oldFS, newcclosure(function(self, ...)
-    local args = {...}
-    local s = ""
-    for i,v in pairs(args) do
-        s = s .. " ["..i.."]=" .. tostring(v):sub(1,30)
-    end
-    print("[HIT REMOTE] " .. self:GetFullName() .. s)
-    return oldFS(self, ...)
-end))
-print("Monitoring... hit the ball manually now")
-]]
+print("[AutoDeflect] v16 loaded - close console, click ON, get near ball")
