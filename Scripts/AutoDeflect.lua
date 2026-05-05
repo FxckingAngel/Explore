@@ -106,7 +106,20 @@ local function fireDeflect()
 	if not deflectBtn or not deflectBtn.Parent then
 		deflectBtn = getDeflectButton()
 	end
-	-- Fire immediately, no wait - game handles its own cooldown
+	-- Aim mouse at ball
+	local ball = cachedBall
+	if ball and ball.Parent then
+		local camera = workspace.CurrentCamera
+		local screenPos, onScreen = camera:WorldToScreenPoint(ball.Position)
+		if onScreen then
+			pcall(VIM.SendMouseMoveEvent, VIM, screenPos.X, screenPos.Y, game)
+		end
+	end
+	-- F key
+	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
+	task.wait(0.05)
+	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
+	-- Button click
 	if deflectBtn then
 		pcall(function()
 			local conn=deflectBtn.MouseButton1Click:Connect(function() end)
@@ -114,8 +127,6 @@ local function fireDeflect()
 			deflectBtn.MouseButton1Click:Fire()
 		end)
 	end
-	pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
-	pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 end
 
 -- Main update
