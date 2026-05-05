@@ -37,7 +37,7 @@ local RADIUS       = 10     -- your detection ring radius (studs)
 local SEGMENTS     = 64     -- ring smoothness
 local BAND         = 4      -- extra tolerance (radius ± studs)
 local COOLDOWN     = 1.5    -- min seconds between triggers on same ball
-local DEBUG        = true   -- print what gets triggered
+local DEBUG        = false   -- print what gets triggered
 
 -- Colors
 local RING_IDLE    = Color3.fromRGB(0, 180, 255)
@@ -489,7 +489,7 @@ stroke.Color     = RING_IDLE
 stroke.Thickness = 1.5
 
 local title = Instance.new("TextLabel", frame)
-title.Text             = "⬤  AUTO-HIT  v14"
+title.Text             = "⬤  AUTO-HIT  v15"
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 12
 title.TextColor3       = RING_IDLE
@@ -603,7 +603,7 @@ _G._AutoDeflectCleanup = function()
 	pcall(ringFolder.Destroy, ringFolder)
 end
 
-print("[AutoDeflect] v14 loaded - spam clicks while ball in ring")
+print("[AutoDeflect] v15 loaded - DEBUG off, close console before using")
 print("[AutoDeflect] Click ON — blue ring = your zone, yellow ring = ball tracking")
 print("[AutoDeflect] Ball enters your ring -> F triggered instantly")
 
