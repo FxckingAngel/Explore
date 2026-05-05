@@ -125,16 +125,13 @@ local function startClicking()
 	if clicking then return end
 	clicking = true
 	task.spawn(function()
-		local cx = workspace.CurrentCamera.ViewportSize.X / 2
-		local cy = workspace.CurrentCamera.ViewportSize.Y / 2
 		while clicking and active do
-			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, true,  game, 1)
+			pcall(VIM.SendKeyEvent, VIM, true,  Enum.KeyCode.F, false, game)
 			task.wait(0.08)
-			pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+			pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 			task.wait(0.12)
 		end
-		-- Release on stop
-		pcall(VIM.SendMouseButtonEvent, VIM, cx, cy, 0, false, game, 1)
+		pcall(VIM.SendKeyEvent, VIM, false, Enum.KeyCode.F, false, game)
 	end)
 end
 
@@ -230,7 +227,7 @@ local stroke=Instance.new("UIStroke",frame)
 stroke.Color=RING_IDLE stroke.Thickness=1.5
 
 local title=Instance.new("TextLabel",frame)
-title.Text="⬤  AUTO-HIT  v16"
+title.Text="⬤  AUTO-HIT  v17"
 title.Font=Enum.Font.GothamBold title.TextSize=13
 title.TextColor3=RING_IDLE title.BackgroundTransparency=1
 title.Position=UDim2.new(0,12,0,8) title.Size=UDim2.new(1,-80,0,18)
@@ -318,4 +315,4 @@ end
 local ok=pcall(function() game:GetService("CoreGui"):GetFullName() end)
 gui.Parent=ok and game:GetService("CoreGui") or plr.PlayerGui
 
-print("[AutoDeflect] v16 loaded - close console, click ON, get near ball")
+print("[AutoDeflect] v17 loaded - F key deflect (works with console open)")
